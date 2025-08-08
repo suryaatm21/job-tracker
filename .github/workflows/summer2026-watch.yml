@@ -38,6 +38,19 @@ jobs:
           MAIL_THREAD_ID: ${{ secrets.MAIL_THREAD_ID }}
         run: python .github/scripts/watch_repo.py
 
+      - name: Telegram test on manual run
+        if: github.event_name == 'workflow_dispatch'
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+        run: |
+          python - <<'PY'
+          import os, requests
+          tok=os.environ["TELEGRAM_BOT_TOKEN"]; chat=os.environ["TELEGRAM_CHAT_ID"]
+          r = requests.post(f"https://api.telegram.org/bot{tok}/sendMessage",
+                            json={"chat_id": chat, "text": "✅ Bot connected: job-tracker is live"})
+          print(r.status_code, r.text)
+          PY
       - name: Persist last seen
         if: ${{ always() }}
         run: |
