@@ -1,0 +1,51 @@
+name: Watch Summer2026 repo
+
+on:
+  schedule:
+    - cron: "*/30 * * * *"  # every 30 minutes
+  workflow_dispatch:
+
+permissions:
+  contents: write  # needed to save .state/last_seen_sha.txt
+
+env:
+  TARGET_REPO: "vanshb03/Summer2026-Internships"
+  WATCH_PATHS: '["README.md","OFFSEASON_README.md","listings.json",".github/scripts/","update_readmes.py","util.py"]'
+
+jobs:
+  watch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - run: pip install requests
+
+      - name: Run watcher
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
+          SMTP_HOST: ${{ secrets.SMTP_HOST }}
+          SMTP_PORT: ${{ secrets.SMTP_PORT }}
+          SMTP_USER: ${{ secrets.SMTP_USER }}
+          SMTP_PASS: ${{ secrets.SMTP_PASS }}
+          MAIL_TO: ${{ secrets.MAIL_TO }}
+          MAIL_THREAD_ID: ${{ secrets.MAIL_THREAD_ID }}
+        run: python .github/scripts/watch_repo.py
+
+      - name: Persist last seen
+        if: ${{ always() }}
+        run: |
+          git config user.name "job-tracker"
+          git config user.email "actions@users.noreply.github.com"
+          mkdir -p .state
+          if [ -n "$(git status --porcelain .state)" ]; then
+            git add .state/last_seen_sha.txt
+            git commit -m "chore: update watcher state"
+            git push
+          fi
