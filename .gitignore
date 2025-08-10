@@ -1,1 +1,2 @@
-.state/
+# State directory is now tracked to persist between workflow runs
+# .state/
