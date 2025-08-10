@@ -24,6 +24,29 @@ jobs:
 
       - run: pip install requests
 
+      - name: Validate environment variables
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+        run: |
+          echo "Checking environment variables..."
+          if [ -z "$TELEGRAM_BOT_TOKEN" ]; then
+            echo "❌ TELEGRAM_BOT_TOKEN is not set"
+            exit 1
+          fi
+          if [ -z "$TELEGRAM_CHAT_ID" ]; then
+            echo "❌ TELEGRAM_CHAT_ID is not set"
+            exit 1
+          fi
+          echo "✅ All required environment variables are set"
+
+      - name: Test Telegram connectivity (manual runs only)
+        if: github.event_name == 'workflow_dispatch'
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+        run: python .github/scripts/test_telegram.py
+
       - name: Run watcher
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -36,9 +59,12 @@ jobs:
           SMTP_PASS: ${{ secrets.SMTP_PASS }}
           MAIL_TO: ${{ secrets.MAIL_TO }}
           MAIL_THREAD_ID: ${{ secrets.MAIL_THREAD_ID }}
-        run: python .github/scripts/watch_repo.py
+        run: |
+          echo "🔍 Starting repository watch..."
+          python .github/scripts/watch_repo.py
+          echo "✅ Watch completed"
 
-      - name: Telegram test on manual run
+      - name: Send manual test notification
         if: github.event_name == 'workflow_dispatch'
         env:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
@@ -48,17 +74,22 @@ jobs:
           import os, requests
           tok=os.environ["TELEGRAM_BOT_TOKEN"]; chat=os.environ["TELEGRAM_CHAT_ID"]
           r = requests.post(f"https://api.telegram.org/bot{tok}/sendMessage",
-                            json={"chat_id": chat, "text": "✅ Bot connected: job-tracker is live"})
-          print(r.status_code, r.text)
+                            json={"chat_id": chat, "text": "✅ Manual workflow test completed - job-tracker is live"})
+          print(f"Status: {r.status_code}, Response: {r.text}")
           PY
-      - name: Persist last seen
+
+      - name: Persist last seen state
         if: ${{ always() }}
         run: |
-          git config user.name "job-tracker"
+          git config user.name "job-tracker-bot"
           git config user.email "actions@users.noreply.github.com"
           mkdir -p .state
           if [ -n "$(git status --porcelain .state)" ]; then
+            echo "📝 Updating state file..."
             git add .state/last_seen_sha.txt
-            git commit -m "chore: update watcher state"
+            git commit -m "chore: update watcher state [skip ci]"
             git push
+            echo "✅ State updated"
+          else
+            echo "ℹ️  No state changes to commit"
           fi
