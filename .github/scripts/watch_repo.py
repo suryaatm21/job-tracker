@@ -7,6 +7,9 @@ GH = "https://api.github.com"
 HEADERS = {"Authorization": f"Bearer {os.getenv('GH_TOKEN','')}",
            "Accept": "application/vnd.github+json"}
 
+# Path to the listings file within TARGET_REPO
+LISTINGS_PATH = os.getenv("LISTINGS_PATH", "listings.json")
+
 def debug_log(msg):
     print(f"[{datetime.now().isoformat()}] DEBUG: {msg}")
 
@@ -84,6 +87,7 @@ def summarize_new(listings_old, listings_new):
 def main():
     debug_log(f"Starting watch for repo: {TARGET_REPO}")
     debug_log(f"Watching paths: {WATCH_PATHS}")
+    debug_log(f"Listings file path: {LISTINGS_PATH}")
     
     last_seen = LAST_FILE.read_text().strip() if LAST_FILE.exists() else None
     debug_log(f"Last seen SHA: {last_seen}")
@@ -109,7 +113,7 @@ def main():
 
     debug_log(f"Processing {len(new)} new commits")
 
-    # Walk from oldest→newest, only when listings.json changed, compute new entries
+    # Walk from oldest→newest, only when listings file changed, compute new entries
     messages = []
     for c in reversed(new):
         sha = c["sha"]; url = c["html_url"]; parent = c["parents"][0]["sha"] if c["parents"] else None
@@ -124,9 +128,10 @@ def main():
             continue
 
         debug_log(f"Watched files changed: {watched_files}")
-
-        after_txt = get_file_at(sha, "listings.json")
-        before_txt = get_file_at(parent, "listings.json") if parent else None
+        
+        # Fetch watched listings file content at before/after refs
+        after_txt = get_file_at(sha, LISTINGS_PATH)
+        before_txt = get_file_at(parent, LISTINGS_PATH) if parent else None
         
         debug_log(f"File content lengths - Before: {len(before_txt) if before_txt else 0}, After: {len(after_txt) if after_txt else 0}")
         

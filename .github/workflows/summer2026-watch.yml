@@ -11,6 +11,7 @@ permissions:
 env:
   TARGET_REPO: "vanshb03/Summer2026-Internships"
   WATCH_PATHS: '["README.md","OFFSEASON_README.md","listings.json",".github/scripts/","update_readmes.py","util.py"]'
+  LISTINGS_PATH: ".github/scripts/listings.json"
 
 jobs:
   watch:
@@ -46,6 +47,14 @@ jobs:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
         run: python .github/scripts/test_telegram.py
+
+      - name: Send latest listing to Telegram (manual runs only)
+        if: github.event_name == 'workflow_dispatch'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+        run: python .github/scripts/send_latest_listing.py
 
       - name: Run watcher
         env:
