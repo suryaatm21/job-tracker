@@ -8,6 +8,8 @@ import os, json, base64, requests
 GH = "https://api.github.com"
 TARGET_REPO = os.environ["TARGET_REPO"]
 LISTINGS_PATH = os.getenv("LISTINGS_PATH", "listings.json")
+DATE_FIELD = os.getenv("DATE_FIELD", "date_posted")
+DATE_FALLBACK = os.getenv("DATE_FALLBACK", "date_updated")
 HEADERS = {"Authorization": f"Bearer {os.getenv('GH_TOKEN','')}",
            "Accept": "application/vnd.github+json"}
 
@@ -54,7 +56,22 @@ def main():
         print("No listings found in", LISTINGS_PATH)
         return 0
 
-    latest = data[0]
+    # Pick the latest by date field, falling back if missing
+    def ts(item):
+        v = item.get(DATE_FIELD)
+        if v is None:
+            v = item.get(DATE_FALLBACK)
+        try:
+            return int(v)
+        except Exception:
+            # Try parse string timestamp (ISO8601 or date)
+            try:
+                from datetime import datetime
+                return int(datetime.fromisoformat(str(v)).timestamp())
+            except Exception:
+                return -1
+
+    latest = max(data, key=ts)
     title = latest.get("title", "")
     company = latest.get("company_name", latest.get("company", ""))
     url = latest.get("url", latest.get("application_link", ""))

@@ -4,6 +4,21 @@ on:
   schedule:
     - cron: "*/30 * * * *"  # every 30 minutes
   workflow_dispatch:
+    inputs:
+      command:
+        description: "Which manual command to run"
+        required: false
+        default: "latest"
+        type: choice
+        options:
+          - latest
+          - today
+          - recent
+      count:
+        description: "Number of listings for 'recent'"
+        required: false
+        default: "10"
+        type: string
 
 permissions:
   contents: write  # needed to save .state/last_seen_sha.txt
@@ -12,6 +27,9 @@ env:
   TARGET_REPO: "vanshb03/Summer2026-Internships"
   WATCH_PATHS: '["README.md","OFFSEASON_README.md","listings.json",".github/scripts/","update_readmes.py","util.py"]'
   LISTINGS_PATH: ".github/scripts/listings.json"
+  DATE_FIELD: "date_posted"
+  DATE_FALLBACK: "date_updated"
+  WINDOW_HOURS: "24"
 
 jobs:
   watch:
@@ -49,12 +67,29 @@ jobs:
         run: python .github/scripts/test_telegram.py
 
       - name: Send latest listing to Telegram (manual runs only)
-        if: github.event_name == 'workflow_dispatch'
+        if: github.event_name == 'workflow_dispatch' && github.event.inputs.command == 'latest'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
         run: python .github/scripts/send_latest_listing.py
+
+      - name: Send today's listings to Telegram (manual runs only)
+        if: github.event_name == 'workflow_dispatch' && github.event.inputs.command == 'today'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+        run: python .github/scripts/send_todays_listings.py
+
+      - name: Send recent listings to Telegram (manual runs only)
+        if: github.event_name == 'workflow_dispatch' && github.event.inputs.command == 'recent'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          COUNT: ${{ github.event.inputs.count }}
+        run: python .github/scripts/send_recent_listings.py
 
       - name: Run watcher
         env:
