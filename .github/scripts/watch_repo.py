@@ -1,4 +1,4 @@
-import os, json, requests, pathlib, base64
+import os, json, requests, pathlib, base64, time
 from datetime import datetime
 
 TARGET_REPO = os.environ["TARGET_REPO"]                     # vanshb03/Summer2026-Internships
@@ -9,6 +9,11 @@ HEADERS = {"Authorization": f"Bearer {os.getenv('GH_TOKEN','')}",
 
 # Path to the listings file within TARGET_REPO
 LISTINGS_PATH = os.getenv("LISTINGS_PATH", "listings.json")
+
+# Date configuration for filtering new listings
+DATE_FIELD = os.getenv("DATE_FIELD", "date_posted")
+DATE_FALLBACK = os.getenv("DATE_FALLBACK", "date_updated")
+WINDOW_HOURS = float(os.getenv("WINDOW_HOURS", "24"))  # Only alert for items in last N hours
 
 def debug_log(msg):
     print(f"[{datetime.now().isoformat()}] DEBUG: {msg}")
@@ -67,22 +72,38 @@ def summarize_new(listings_old, listings_new):
         for x in lst:
             if isinstance(x, dict):
                 k = x.get("id") or x.get("url") or (x.get("company_name"), x.get("title"))
-                if k: keys.add(k)
+                if k:
+                    keys.add(k)
         return keys
+
+    def to_epoch(v):
+        try:
+            return int(v)
+        except Exception:
+            try:
+                from datetime import datetime as _dt
+                return int(_dt.fromisoformat(str(v)).timestamp())
+            except Exception:
+                return -1
+
     old = keyset(listings_old or [])
     new = keyset(listings_new or [])
     delta_keys = [k for k in new - old]
-    # Build pretty lines by scanning new list for matching keys
-    lines = []
+
+    # Build entries with timestamp for filtering later
+    entries = []
     for x in listings_new or []:
         k = x.get("id") or x.get("url") or (x.get("company_name"), x.get("title"))
         if k in delta_keys:
-            title = x.get("title","")
-            company = x.get("company_name","")
-            url = x.get("url","")
-            season = x.get("season","")
-            lines.append(f"• {company} — {title} [{season}] {url}")
-    return lines
+            title = x.get("title", "")
+            company = x.get("company_name", "")
+            url = x.get("url", "")
+            season = x.get("season", "")
+            ts_val = x.get(DATE_FIELD, x.get(DATE_FALLBACK))
+            ts = to_epoch(ts_val)
+            line = f"• {company} — {title} [{season}] {url}"
+            entries.append({"line": line, "ts": ts})
+    return entries
 
 def main():
     debug_log(f"Starting watch for repo: {TARGET_REPO}")
@@ -143,12 +164,18 @@ def main():
             debug_log(f"JSON parse failed: {e}")
             continue
 
-        new_lines = summarize_new(before, after)
-        debug_log(f"New listings detected: {len(new_lines)}")
-        
-        if new_lines:
-            header = f"New internships detected ({len(new_lines)}) – {url}"
-            messages.append("\n".join([header, *new_lines[:10]]))  # cap to 10 lines
+        new_entries = summarize_new(before, after)
+        debug_log(f"New listings detected (pre-filter): {len(new_entries)}")
+
+        # Filter to only entries within last WINDOW_HOURS
+        cutoff = time.time() - (WINDOW_HOURS * 3600.0)
+        filtered = [e for e in new_entries if e.get("ts", -1) >= cutoff]
+        debug_log(f"New listings after {WINDOW_HOURS}h filter: {len(filtered)}")
+
+        if filtered:
+            header = f"New internships detected ({len(filtered)})"
+            lines = [e["line"] for e in filtered[:10]]  # cap to 10 lines
+            messages.append("\n".join([header, *lines]))
 
     # Update last seen to newest commit we examined
     debug_log(f"Updating last seen to: {commits[0]['sha']}")
