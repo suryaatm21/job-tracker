@@ -1,6 +1,6 @@
 # Internship Listing Bot
 
-A Telegram bot that notifies you when new internship listings are added to the `listings.json` file in a target GitHub repository.
+A Telegram bot that notifies you when new internship listings are added to the `listings.json` file in a target GitHub repository with Github Actions running at a set interval of time.
 
 ## Features
 - Sends a Telegram DM when `listings.json` changes.
