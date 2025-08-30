@@ -1,4 +1,3 @@
-# State directory is now tracked to persist between workflow runs
-# .state/
-.env
+# State directory for local development - Actions uses cache
 .state/
+.env
