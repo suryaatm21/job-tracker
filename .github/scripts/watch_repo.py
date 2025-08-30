@@ -1,14 +1,16 @@
 import os, json, requests, pathlib, base64, time
 from datetime import datetime
+from urllib.parse import urlparse
 
-TARGET_REPO = os.environ["TARGET_REPO"]                     # vanshb03/Summer2026-Internships
-WATCH_PATHS = set(json.loads(os.environ["WATCH_PATHS"]))    # ["listings.json"]
+# Multi-repo configuration
+TARGET_REPOS = json.loads(os.environ.get("TARGET_REPOS", '["vanshb03/Summer2026-Internships"]'))
+WATCH_PATHS = set(json.loads(os.environ.get("WATCH_PATHS", '["listings.json"]')))
 GH = "https://api.github.com"
 HEADERS = {"Authorization": f"Bearer {os.getenv('GH_TOKEN','')}",
            "Accept": "application/vnd.github+json"}
 
-# Path to the listings file within TARGET_REPO
-LISTINGS_PATH = os.getenv("LISTINGS_PATH", "listings.json")
+# Path to the listings file within each repo
+LISTINGS_PATH = os.getenv("LISTINGS_PATH", ".github/scripts/listings.json")
 
 # Date configuration for filtering new listings
 DATE_FIELD = os.getenv("DATE_FIELD", "date_posted")
@@ -19,23 +21,44 @@ def debug_log(msg):
     print(f"[{datetime.now().isoformat()}] DEBUG: {msg}")
 
 STATE_DIR = pathlib.Path(".state"); STATE_DIR.mkdir(exist_ok=True, parents=True)
-LAST_FILE = STATE_DIR / "last_seen_sha.txt"
 
 def gh(url, **params):
     r = requests.get(url, headers=HEADERS, params=params)
     r.raise_for_status()
     return r.json()
 
-def list_commits(per_page=15):
-    return gh(f"{GH}/repos/{TARGET_REPO}/commits", per_page=per_page)
+def get_default_branch(repo):
+    """Get default branch for a repository"""
+    repo_info = gh(f"{GH}/repos/{repo}")
+    return repo_info["default_branch"]
 
-def commit_detail(sha):
-    return gh(f"{GH}/repos/{TARGET_REPO}/commits/{sha}")
+def detect_listings_path(repo, branch):
+    """Try to find listings file in repo, trying LISTINGS_PATH first, then fallbacks"""
+    paths_to_try = [LISTINGS_PATH, ".github/scripts/listings.json", "listings.json"]
+    
+    for path in paths_to_try:
+        try:
+            gh(f"{GH}/repos/{repo}/contents/{path}", ref=branch)
+            debug_log(f"Found listings file at {path} in {repo}")
+            return path
+        except requests.HTTPError as e:
+            if e.response.status_code == 404:
+                continue
+            raise
+    
+    debug_log(f"Warning: Could not find listings file in {repo}")
+    return LISTINGS_PATH  # fallback to configured path
 
-def get_file_at(ref, path):
-    # GET /repos/{owner}/{repo}/contents/{path}?ref={ref}
+def list_commits(repo, per_page=15):
+    return gh(f"{GH}/repos/{repo}/commits", per_page=per_page)
+
+def commit_detail(repo, sha):
+    return gh(f"{GH}/repos/{repo}/commits/{sha}")
+
+def get_file_at(repo, ref, path):
+    """GET /repos/{owner}/{repo}/contents/{path}?ref={ref}"""
     try:
-        data = gh(f"{GH}/repos/{TARGET_REPO}/contents/{path}", ref=ref)
+        data = gh(f"{GH}/repos/{repo}/contents/{path}", ref=ref)
         if data.get("encoding") == "base64":
             return base64.b64decode(data["content"]).decode("utf-8")
         return data["content"]
@@ -65,127 +88,188 @@ def send_telegram(text):
         debug_log(f"Telegram send failed: {e}")
         return False
 
-def summarize_new(listings_old, listings_new):
-    # Each item has fields like id, url, title, company_name, season
-    def keyset(lst):
-        keys = set()
-        for x in lst:
-            if isinstance(x, dict):
-                k = x.get("id") or x.get("url") or (x.get("company_name"), x.get("title"))
-                if k:
-                    keys.add(k)
-        return keys
+def normalize_url(url):
+    """Normalize URL to scheme+host+path for deduplication"""
+    if not url:
+        return None
+    try:
+        parsed = urlparse(url)
+        # Keep scheme, netloc (host), and path; drop query and fragment
+        return f"{parsed.scheme}://{parsed.netloc}{parsed.path}".rstrip('/')
+    except Exception:
+        return url
 
-    def to_epoch(v):
-        try:
-            return int(v)
-        except Exception:
-            try:
-                from datetime import datetime as _dt
-                return int(_dt.fromisoformat(str(v)).timestamp())
-            except Exception:
-                return -1
-
-    old = keyset(listings_old or [])
-    new = keyset(listings_new or [])
-    delta_keys = [k for k in new - old]
-
-    # Build entries with timestamp for filtering later
-    entries = []
-    for x in listings_new or []:
-        k = x.get("id") or x.get("url") or (x.get("company_name"), x.get("title"))
-        if k in delta_keys:
-            title = x.get("title", "")
-            company = x.get("company_name", "")
-            url = x.get("url", "")
-            season = x.get("season", "")
-            ts_val = x.get(DATE_FIELD, x.get(DATE_FALLBACK))
-            ts = to_epoch(ts_val)
-            line = f"• {company} — {title} [{season}] {url}"
-            entries.append({"line": line, "ts": ts})
-    return entries
-
-def main():
-    debug_log(f"Starting watch for repo: {TARGET_REPO}")
-    debug_log(f"Watching paths: {WATCH_PATHS}")
-    debug_log(f"Listings file path: {LISTINGS_PATH}")
+def get_dedup_key(item):
+    """Get deduplication key: id -> normalized_url -> (company.lower(), title.lower())"""
+    if item.get("id"):
+        return ("id", item["id"])
     
-    last_seen = LAST_FILE.read_text().strip() if LAST_FILE.exists() else None
-    debug_log(f"Last seen SHA: {last_seen}")
+    norm_url = normalize_url(item.get("url"))
+    if norm_url:
+        return ("url", norm_url)
+    
+    company = (item.get("company_name", "") or "").lower().strip()
+    title = (item.get("title", "") or "").lower().strip()
+    if company and title:
+        return ("company_title", (company, title))
+    
+    return None
 
-    commits = list_commits(per_page=20)
-    if not commits: 
-        debug_log("No commits found")
-        return
+def to_epoch(v):
+    try:
+        return int(v)
+    except Exception:
+        try:
+            from datetime import datetime as _dt
+            return int(_dt.fromisoformat(str(v)).timestamp())
+        except Exception:
+            return -1
 
-    debug_log(f"Found {len(commits)} recent commits")
-
+def get_repo_entries(repo, listings_path, last_seen_sha):
+    """Get new entries from a single repository"""
+    debug_log(f"Processing repo: {repo}")
+    
+    commits = list_commits(repo, per_page=20)
+    if not commits:
+        debug_log(f"No commits found in {repo}")
+        return []
+    
+    debug_log(f"Found {len(commits)} recent commits in {repo}")
+    
     # Collect unseen commits (newest→oldest until last_seen)
     new = []
     for c in commits:
-        if c["sha"] == last_seen: 
-            debug_log(f"Found last seen commit: {c['sha']}")
+        if c["sha"] == last_seen_sha:
+            debug_log(f"Found last seen commit: {c['sha']} in {repo}")
             break
         new.append(c)
-
+    
     if not new:
-        debug_log("No new commits since last run")
-        return
-
-    debug_log(f"Processing {len(new)} new commits")
-
-    # Walk from oldest→newest, only when listings file changed, compute new entries
-    messages = []
-    for c in reversed(new):
-        sha = c["sha"]; url = c["html_url"]; parent = c["parents"][0]["sha"] if c["parents"] else None
-        debug_log(f"Processing commit: {sha[:8]} - {c.get('commit', {}).get('message', '')[:50]}")
+        debug_log(f"No new commits since last run in {repo}")
+        return []
+    
+    debug_log(f"Processing {len(new)} new commits in {repo}")
+    
+    # Accumulate new entries from all commits
+    all_new_entries = []
+    for c in reversed(new):  # oldest→newest
+        sha = c["sha"]
+        parent = c["parents"][0]["sha"] if c["parents"] else None
+        debug_log(f"Processing commit: {sha[:8]} in {repo}")
         
-        files = [f["filename"] for f in commit_detail(sha).get("files",[])]
-        debug_log(f"Files changed: {files}")
-        
+        files = [f["filename"] for f in commit_detail(repo, sha).get("files", [])]
         watched_files = [f for f in files if watched(f)]
+        
         if not watched_files:
-            debug_log("No watched files in this commit")
+            debug_log(f"No watched files in commit {sha[:8]} of {repo}")
             continue
-
-        debug_log(f"Watched files changed: {watched_files}")
         
-        # Fetch watched listings file content at before/after refs
-        after_txt = get_file_at(sha, LISTINGS_PATH)
-        before_txt = get_file_at(parent, LISTINGS_PATH) if parent else None
+        debug_log(f"Watched files changed in {repo}: {watched_files}")
         
-        debug_log(f"File content lengths - Before: {len(before_txt) if before_txt else 0}, After: {len(after_txt) if after_txt else 0}")
+        # Fetch listings file content at before/after refs
+        after_txt = get_file_at(repo, sha, listings_path)
+        before_txt = get_file_at(repo, parent, listings_path) if parent else None
         
         try:
             after = json.loads(after_txt) if after_txt else []
             before = json.loads(before_txt) if before_txt else []
-            debug_log(f"Listings count - Before: {len(before)}, After: {len(after)}")
+            debug_log(f"Listings count in {repo} - Before: {len(before)}, After: {len(after)}")
         except Exception as e:
-            debug_log(f"JSON parse failed: {e}")
+            debug_log(f"JSON parse failed in {repo}: {e}")
             continue
+        
+        # Find new entries in this commit
+        before_keys = {get_dedup_key(x) for x in before if get_dedup_key(x)}
+        for item in after:
+            key = get_dedup_key(item)
+            if key and key not in before_keys:
+                ts_val = item.get(DATE_FIELD, item.get(DATE_FALLBACK))
+                ts = to_epoch(ts_val)
+                
+                # Apply time window filter
+                cutoff = time.time() - (WINDOW_HOURS * 3600.0)
+                if ts >= cutoff:
+                    title = item.get("title", "")
+                    company = item.get("company_name", "")
+                    url = item.get("url", "")
+                    season = item.get("season", "")
+                    line = f"• {company} — {title} [{season}] {url}"
+                    all_new_entries.append({
+                        "key": key,
+                        "line": line,
+                        "ts": ts,
+                        "repo": repo
+                    })
+    
+    return all_new_entries
 
-        new_entries = summarize_new(before, after)
-        debug_log(f"New listings detected (pre-filter): {len(new_entries)}")
-
-        # Filter to only entries within last WINDOW_HOURS
-        cutoff = time.time() - (WINDOW_HOURS * 3600.0)
-        filtered = [e for e in new_entries if e.get("ts", -1) >= cutoff]
-        debug_log(f"New listings after {WINDOW_HOURS}h filter: {len(filtered)}")
-
-        if filtered:
-            header = f"New internships detected ({len(filtered)})"
-            lines = [e["line"] for e in filtered[:10]]  # cap to 10 lines
-            messages.append("\n".join([header, *lines]))
-
-    # Update last seen to newest commit we examined
-    debug_log(f"Updating last seen to: {commits[0]['sha']}")
-    LAST_FILE.write_text(commits[0]["sha"])
-
-    if messages:
-        debug_log(f"Sending {len(messages)} messages")
-        send_telegram("\n\n".join(messages))
+def main():
+    debug_log(f"Starting multi-repo watch for: {TARGET_REPOS}")
+    debug_log(f"Watching paths: {WATCH_PATHS}")
+    debug_log(f"Listings file path hint: {LISTINGS_PATH}")
+    
+    all_entries = []
+    
+    # Process each repository
+    for repo in TARGET_REPOS:
+        # Get per-repo state file
+        safe_repo_name = repo.replace("/", "_")
+        last_file = STATE_DIR / f"last_seen_{safe_repo_name}.txt"
+        last_seen = last_file.read_text().strip() if last_file.exists() else None
+        debug_log(f"Last seen SHA for {repo}: {last_seen}")
+        
+        try:
+            # Detect default branch and listings path
+            default_branch = get_default_branch(repo)
+            listings_path = detect_listings_path(repo, default_branch)
+            
+            # Get new entries from this repo
+            repo_entries = get_repo_entries(repo, listings_path, last_seen)
+            all_entries.extend(repo_entries)
+            
+            # Update last seen SHA for this repo
+            commits = list_commits(repo, per_page=1)
+            if commits:
+                newest_sha = commits[0]["sha"]
+                last_file.write_text(newest_sha)
+                debug_log(f"Updated last seen SHA for {repo}: {newest_sha}")
+        
+        except Exception as e:
+            debug_log(f"Error processing repo {repo}: {e}")
+            continue
+    
+    if not all_entries:
+        debug_log("No new entries found across all repos")
+        return
+    
+    debug_log(f"Found {len(all_entries)} new entries before deduplication")
+    
+    # Deduplicate across all repos (keep first occurrence by timestamp desc)
+    seen_keys = set()
+    deduped_entries = []
+    
+    # Sort by timestamp descending to prefer newer entries
+    all_entries.sort(key=lambda x: x["ts"], reverse=True)
+    
+    for entry in all_entries:
+        if entry["key"] not in seen_keys:
+            seen_keys.add(entry["key"])
+            deduped_entries.append(entry)
+    
+    debug_log(f"After deduplication: {len(deduped_entries)} unique entries")
+    
+    if deduped_entries:
+        # Sort final entries by timestamp desc and take up to 10
+        deduped_entries.sort(key=lambda x: x["ts"], reverse=True)
+        lines = [entry["line"] for entry in deduped_entries[:10]]
+        
+        header = f"New internships detected ({len(deduped_entries)})"
+        message = "\n".join([header] + lines)
+        
+        debug_log(f"Sending message with {len(lines)} lines")
+        send_telegram(message)
     else:
-        debug_log("No messages to send")
+        debug_log("No messages to send after deduplication")
 
 if __name__ == "__main__":
     main()

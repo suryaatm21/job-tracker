@@ -21,7 +21,7 @@ permissions:
   contents: read
 
 env:
-  TARGET_REPO: "vanshb03/Summer2026-Internships"
+  TARGET_REPOS: '["SimplifyJobs/Summer2026-Internships","vanshb03/Summer2026-Internships"]'
   WATCH_PATHS: '["listings.json"]'
   LISTINGS_PATH: ".github/scripts/listings.json"
   DATE_FIELD: "date_posted"
@@ -43,7 +43,7 @@ jobs:
         uses: actions/cache/restore@v4
         with:
           path: .state
-          key: last-seen-v1
+          key: last-seen-multi-v1
 
       - name: Validate Telegram env
         env:
@@ -59,6 +59,8 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          TARGET_REPO: "vanshb03/Summer2026-Internships"
+          LISTINGS_PATH: ${{ env.LISTINGS_PATH }}
         run: python .github/scripts/send_latest_listing.py
 
       - name: run today
@@ -67,6 +69,8 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          TARGET_REPO: "vanshb03/Summer2026-Internships"
+          LISTINGS_PATH: ${{ env.LISTINGS_PATH }}
         run: python .github/scripts/send_todays_listings.py
 
       - name: run recent
@@ -75,6 +79,8 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          TARGET_REPO: "vanshb03/Summer2026-Internships"
+          LISTINGS_PATH: ${{ env.LISTINGS_PATH }}
           COUNT: ${{ github.event.inputs.count }}
         run: python .github/scripts/send_recent_listings.py
 
@@ -84,10 +90,16 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          TARGET_REPOS: ${{ env.TARGET_REPOS }}
+          WATCH_PATHS: ${{ env.WATCH_PATHS }}
+          LISTINGS_PATH: ${{ env.LISTINGS_PATH }}
+          DATE_FIELD: ${{ env.DATE_FIELD }}
+          DATE_FALLBACK: ${{ env.DATE_FALLBACK }}
+          WINDOW_HOURS: ${{ env.WINDOW_HOURS }}
         run: python .github/scripts/watch_repo.py
 
       - name: Save watcher state
         uses: actions/cache/save@v4
         with:
           path: .state
-          key: last-seen-v1
+          key: last-seen-multi-v1
