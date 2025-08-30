@@ -1,0 +1,93 @@
+name: DM fast watcher
+
+on:
+  schedule:
+    - cron: "*/5 * * * *"  # fastest GitHub allows
+  workflow_dispatch:
+    inputs:
+      command:
+        description: "latest | today | recent"
+        required: false
+        default: "latest"
+        type: choice
+        options: [latest, today, recent]
+      count:
+        description: "N for recent"
+        required: false
+        default: "10"
+        type: string
+
+permissions:
+  contents: read
+
+env:
+  TARGET_REPO: "vanshb03/Summer2026-Internships"
+  WATCH_PATHS: '["listings.json"]'
+  LISTINGS_PATH: "listings.json"
+  DATE_FIELD: "date_posted"
+  DATE_FALLBACK: "date_updated"
+  WINDOW_HOURS: "24"
+
+jobs:
+  watch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: "3.11" }
+      - run: pip install requests
+
+      # Use cache for .state so we don't commit it
+      - name: Restore watcher state
+        id: cache-restore
+        uses: actions/cache/restore@v4
+        with:
+          path: .state
+          key: last-seen-v1
+
+      - name: Validate Telegram env
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+        run: |
+          test -n "$TELEGRAM_BOT_TOKEN" && test -n "$TELEGRAM_CHAT_ID"
+
+      # Manual commands to your DM
+      - name: run latest
+        if: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.command == 'latest' }}
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+        run: python .github/scripts/send_latest_listing.py
+
+      - name: run today
+        if: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.command == 'today' }}
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+        run: python .github/scripts/send_todays_listings.py
+
+      - name: run recent
+        if: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.command == 'recent' }}
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          COUNT: ${{ github.event.inputs.count }}
+        run: python .github/scripts/send_recent_listings.py
+
+      # Scheduled watcher → DM (only when true additions within WINDOW_HOURS)
+      - name: watcher (schedule + manual)
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+        run: python .github/scripts/watch_repo.py
+
+      - name: Save watcher state
+        uses: actions/cache/save@v4
+        with:
+          path: .state
+          key: last-seen-v1
