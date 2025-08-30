@@ -23,7 +23,7 @@ permissions:
 env:
   TARGET_REPO: "vanshb03/Summer2026-Internships"
   WATCH_PATHS: '["listings.json"]'
-  LISTINGS_PATH: "listings.json"
+  LISTINGS_PATH: ".github/scripts/listings.json"
   DATE_FIELD: "date_posted"
   DATE_FALLBACK: "date_updated"
   WINDOW_HOURS: "24"
