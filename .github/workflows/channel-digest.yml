@@ -5,8 +5,18 @@ on:
     - cron: "0 */8 * * *"
   workflow_dispatch:
     inputs:
+      command:
+        description: "Which manual command to run"
+        required: false
+        default: "digest"
+        type: choice
+        options:
+          - digest
+          - latest
+          - today
+          - recent
       count:
-        description: "Max items to include"
+        description: "Max items to include (digest) or N for recent"
         required: false
         default: "50"
 
@@ -30,6 +40,7 @@ jobs:
       - run: pip install requests
 
       - name: Run 8h digest to channel
+        if: github.event_name == 'schedule' || github.event.inputs.command == 'digest'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
@@ -39,3 +50,28 @@ jobs:
           WINDOW_HOURS: ${{ env.WINDOW_HOURS }}
           COUNT: ${{ github.event.inputs.count }}
         run: python .github/scripts/send_digest_window.py
+
+      - name: Send latest listing to channel (manual runs only)
+        if: github.event_name == 'workflow_dispatch' && github.event.inputs.command == 'latest'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID_CHANNEL }}
+        run: python .github/scripts/send_latest_listing.py
+
+      - name: Send today's listings to channel (manual runs only)
+        if: github.event_name == 'workflow_dispatch' && github.event.inputs.command == 'today'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID_CHANNEL }}
+        run: python .github/scripts/send_todays_listings.py
+
+      - name: Send recent listings to channel (manual runs only)
+        if: github.event_name == 'workflow_dispatch' && github.event.inputs.command == 'recent'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID_CHANNEL }}
+          COUNT: ${{ github.event.inputs.count }}
+        run: python .github/scripts/send_recent_listings.py
