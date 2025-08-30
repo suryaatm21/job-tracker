@@ -15,7 +15,7 @@ HEADERS = {"Accept":"application/vnd.github+json",
 def gh_get(url, **params):
     r = requests.get(url, headers=HEADERS, params=params); r.raise_for_status(); return r.json()
 
-def get_listings(ref="heads/main"):
+def get_listings(ref=None):
     data = gh_get(f"{GH}/repos/{TARGET_REPO}/contents/{LISTINGS_PATH}", ref=ref)
     raw = base64.b64decode(data["content"]).decode("utf-8") if data.get("encoding")=="base64" else data["content"]
     return json.loads(raw)
@@ -23,6 +23,11 @@ def get_listings(ref="heads/main"):
 def parse_dt(s):
     if not s: return None
     s = str(s)
+    try:
+        # Try as epoch timestamp first (this is what the listings actually use)
+        return datetime.fromtimestamp(int(s), tz=timezone.utc)
+    except Exception:
+        pass
     try:
         # ISO-8601 or ISO with Z
         return datetime.fromisoformat(s.replace("Z","+00:00")).astimezone(timezone.utc)
