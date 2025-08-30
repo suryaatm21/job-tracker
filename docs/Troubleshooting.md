@@ -3,6 +3,7 @@
 ## Quick Verification Steps
 
 ### 1. Test Telegram Bot Locally
+
 ```bash
 # Set your environment variables (replace with actual values)
 export TELEGRAM_BOT_TOKEN="your_bot_token_here"
@@ -13,43 +14,54 @@ python .github/scripts/test_telegram.py
 ```
 
 ### 2. Manual Workflow Trigger
+
 - Go to GitHub Actions tab in your repository
 - Click on "Watch Summer2026 repo" workflow
 - Click "Run workflow" button
 - Check the logs for debug output
 
 ### 3. GitHub Secrets Verification
+
 Make sure these secrets are set in your repository settings:
+
 - `TELEGRAM_BOT_TOKEN`: Your bot token from @BotFather
 - `TELEGRAM_CHAT_ID`: Your user ID from @userinfobot
 
 ## Common Issues & Solutions
 
 ### Issue: "No commits found"
+
 **Cause**: GitHub API rate limiting or repository access issues
-**Solution**: 
+**Solution**:
+
 - Check if the target repository exists: `vanshb03/Summer2026-Internships`
 - Verify GitHub token has proper permissions
 
 ### Issue: "Missing Telegram credentials"
+
 **Cause**: Secrets not properly configured
 **Solution**:
+
 1. Go to GitHub repo → Settings → Secrets and variables → Actions
 2. Add/update `TELEGRAM_BOT_TOKEN` and `TELEGRAM_CHAT_ID`
 
 ### Issue: "JSON parse failed"
+
 **Cause**: `listings.json` file format issues in target repo
 **Solution**: Check the target repository's `listings.json` file format
 
 ### Issue: State file conflicts
+
 **Cause**: `.state/` directory was previously in `.gitignore`
-**Solution**: 
+**Solution**:
+
 - The state directory is now tracked
 - Old state files may need to be manually created
 
 ## Debug Output Examples
 
 ### Successful Run
+
 ```
 [2025-01-09T10:30:00] DEBUG: Starting watch for repo: vanshb03/Summer2026-Internships
 [2025-01-09T10:30:00] DEBUG: Found 15 recent commits
@@ -59,6 +71,7 @@ Make sure these secrets are set in your repository settings:
 ```
 
 ### No Changes
+
 ```
 [2025-01-09T10:30:00] DEBUG: Starting watch for repo: vanshb03/Summer2026-Internships
 [2025-01-09T10:30:00] DEBUG: No new commits since last run
@@ -86,12 +99,14 @@ git push
 ## Getting Your Telegram IDs
 
 ### Bot Token
+
 1. Message @BotFather on Telegram
 2. Create a new bot: `/newbot`
 3. Follow the instructions
 4. Copy the token provided
 
 ### Chat ID
+
 1. Message @userinfobot on Telegram
 2. It will reply with your user ID
 3. Use this number as your `TELEGRAM_CHAT_ID`

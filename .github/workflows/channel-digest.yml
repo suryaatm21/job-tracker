@@ -1,0 +1,41 @@
+name: Channel digest (8h)
+
+on:
+  schedule:
+    - cron: "0 */8 * * *"
+  workflow_dispatch:
+    inputs:
+      count:
+        description: "Max items to include"
+        required: false
+        default: "50"
+
+permissions:
+  contents: read
+
+env:
+  TARGET_REPO: "vanshb03/Summer2026-Internships"
+  LISTINGS_PATH: "listings.json"
+  DATE_FIELD: "date_posted"
+  DATE_FALLBACK: "date_updated"
+  WINDOW_HOURS: "8"
+
+jobs:
+  digest:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: "3.11" }
+      - run: pip install requests
+
+      - name: Run 8h digest to channel
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID_CHANNEL }}
+          DATE_FIELD: ${{ env.DATE_FIELD }}
+          DATE_FALLBACK: ${{ env.DATE_FALLBACK }}
+          WINDOW_HOURS: ${{ env.WINDOW_HOURS }}
+          COUNT: ${{ github.event.inputs.count }}
+        run: python .github/scripts/send_digest_window.py
