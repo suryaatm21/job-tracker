@@ -2,13 +2,13 @@ name: Channel digest (8h)
 
 on:
   schedule:
-    - cron: "0 */8 * * *"
+    - cron: '0 */8 * * *'
   workflow_dispatch:
     inputs:
       command:
-        description: "Which manual command to run"
+        description: 'Which manual command to run'
         required: false
-        default: "digest"
+        default: 'digest'
         type: choice
         options:
           - digest
@@ -16,19 +16,19 @@ on:
           - today
           - recent
       count:
-        description: "Max items to include (digest) or N for recent"
+        description: 'Max items to include (digest) or N for recent'
         required: false
-        default: "50"
+        default: '50'
 
 permissions:
   contents: read
 
 env:
-  TARGET_REPO: "vanshb03/Summer2026-Internships"
-  LISTINGS_PATH: ".github/scripts/listings.json"
-  DATE_FIELD: "date_posted"
-  DATE_FALLBACK: "date_updated"
-  WINDOW_HOURS: "8"
+  TARGET_REPO: 'vanshb03/Summer2026-Internships'
+  LISTINGS_PATH: '.github/scripts/listings.json'
+  DATE_FIELD: 'date_posted'
+  DATE_FALLBACK: 'date_updated'
+  WINDOW_HOURS: '8'
 
 jobs:
   digest:
@@ -36,7 +36,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
-        with: { python-version: "3.11" }
+        with: { python-version: '3.11' }
       - run: pip install requests
 
       - name: Run 8h digest to channel
