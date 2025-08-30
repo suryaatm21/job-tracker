@@ -1,8 +1,8 @@
-name: Channel digest (8h)
+name: Channel digest (4h)
 
 on:
   schedule:
-    - cron: '0 */8 * * *'
+    - cron: '0 */4 * * *'
   workflow_dispatch:
     inputs:
       command:
@@ -28,7 +28,7 @@ env:
   LISTINGS_PATH: '.github/scripts/listings.json'
   DATE_FIELD: 'date_posted'
   DATE_FALLBACK: 'date_updated'
-  WINDOW_HOURS: '8'
+  WINDOW_HOURS: '4'
 
 jobs:
   digest:
@@ -39,7 +39,7 @@ jobs:
         with: { python-version: '3.11' }
       - run: pip install requests
 
-      - name: Run 8h digest to channel
+      - name: Run 4h digest to channel
         if: github.event_name == 'schedule' || github.event.inputs.command == 'digest'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
