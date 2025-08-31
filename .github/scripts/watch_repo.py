@@ -15,7 +15,7 @@ LISTINGS_PATH = os.getenv("LISTINGS_PATH", ".github/scripts/listings.json")
 # Date configuration for filtering new listings
 DATE_FIELD = os.getenv("DATE_FIELD", "date_posted")
 DATE_FALLBACK = os.getenv("DATE_FALLBACK", "date_updated")
-WINDOW_HOURS = float(os.getenv("WINDOW_HOURS", "24"))  # Only alert for items in last N hours
+WINDOW_HOURS = float(os.getenv("WINDOW_HOURS", "720"))  # Only alert for items in last N hours (default 30 days for testing)
 
 def debug_log(msg):
     print(f"[{datetime.now().isoformat()}] DEBUG: {msg}")
@@ -216,7 +216,9 @@ def get_repo_entries(repo, listings_path, last_seen_sha):
                     url = item.get("url", "")
                     season = get_unified_season(item)  # Use unified season handling
                     season_str = f"[{season}]" if season else ""
-                    line = f"• {company} — {title} {season_str} {url}".strip()
+                    # Add source tag for testing to distinguish repos
+                    repo_short = repo.split('/')[-1] if '/' in repo else repo
+                    line = f"• {company} — {title} {season_str} [{repo_short}] {url}".strip()
                     all_new_entries.append({
                         "key": key,
                         "line": line,
