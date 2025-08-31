@@ -1,5 +1,6 @@
 import os, json, base64, requests
 from datetime import datetime, timedelta, timezone
+from github_helper import fetch_file_json, debug_log, gh_get, GH
 
 TARGET_REPO   = os.environ["TARGET_REPO"]
 LISTINGS_PATH = os.environ.get("LISTINGS_PATH","listings.json")
@@ -8,17 +9,9 @@ DATE_FALLBACK = os.environ.get("DATE_FALLBACK","date_updated")
 WINDOW_HOURS  = int(os.environ.get("WINDOW_HOURS","8"))
 COUNT         = int(os.environ.get("COUNT","50") or "50")
 
-GH = "https://api.github.com"
-HEADERS = {"Accept":"application/vnd.github+json",
-           "Authorization": f"Bearer {os.getenv('GH_TOKEN','')}"}
-
-def gh_get(url, **params):
-    r = requests.get(url, headers=HEADERS, params=params); r.raise_for_status(); return r.json()
-
 def get_listings(ref=None):
-    data = gh_get(f"{GH}/repos/{TARGET_REPO}/contents/{LISTINGS_PATH}", ref=ref)
-    raw = base64.b64decode(data["content"]).decode("utf-8") if data.get("encoding")=="base64" else data["content"]
-    return json.loads(raw)
+    """Fetch listings using robust helper"""
+    return fetch_file_json(TARGET_REPO, LISTINGS_PATH, ref)
 
 def parse_dt(s):
     if not s: return None
@@ -58,9 +51,10 @@ def main():
             title   = x.get("title","").strip()
             url     = x.get("url","").strip()
             season  = x.get("season","")
-            rows.append((dt, f"• {company} — {title} [{season}] {url}"))
+            rows.append((dt, f"• {company} — {title} [{season}] {url}", company))
 
-    rows.sort(key=lambda t: t[0], reverse=True)
+    # Sort by company name alphabetically, then by timestamp desc
+    rows.sort(key=lambda t: (t[2].lower(), -t[0].timestamp()))
     if not rows:
         return  # silent when no new items
 

@@ -2,31 +2,32 @@ name: DM fast watcher
 
 on:
   schedule:
-    - cron: "*/5 * * * *"  # fastest GitHub allows
+    - cron: '*/5 * * * *' # fastest GitHub allows
   workflow_dispatch:
     inputs:
       command:
-        description: "latest | today | recent"
+        description: 'latest | today | recent'
         required: false
-        default: "latest"
+        default: 'latest'
         type: choice
         options: [latest, today, recent]
       count:
-        description: "N for recent"
+        description: 'N for recent'
         required: false
-        default: "10"
+        default: '10'
         type: string
 
 permissions:
   contents: read
 
 env:
-  TARGET_REPO: "vanshb03/Summer2026-Internships"
+  TARGET_REPOS: '["SimplifyJobs/Summer2026-Internships","vanshb03/Summer2026-Internships"]'
   WATCH_PATHS: '["listings.json"]'
-  LISTINGS_PATH: ".github/scripts/listings.json"
-  DATE_FIELD: "date_posted"
-  DATE_FALLBACK: "date_updated"
-  WINDOW_HOURS: "24"
+  LISTINGS_PATH: '.github/scripts/listings.json'
+  DATE_FIELD: 'date_posted'
+  DATE_FALLBACK: 'date_updated'
+  WINDOW_HOURS: '24'
+  SEEN_TTL_DAYS: '7'  # DM alerts: shorter TTL for frequent updates
 
 jobs:
   watch:
@@ -34,7 +35,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
-        with: { python-version: "3.11" }
+        with: { python-version: '3.11' }
       - run: pip install requests
 
       # Use cache for .state so we don't commit it
@@ -43,7 +44,7 @@ jobs:
         uses: actions/cache/restore@v4
         with:
           path: .state
-          key: last-seen-v1
+          key: last-seen-multi-v1
 
       - name: Validate Telegram env
         env:
@@ -59,6 +60,8 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          TARGET_REPO: 'vanshb03/Summer2026-Internships'
+          LISTINGS_PATH: ${{ env.LISTINGS_PATH }}
         run: python .github/scripts/send_latest_listing.py
 
       - name: run today
@@ -67,6 +70,8 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          TARGET_REPO: 'vanshb03/Summer2026-Internships'
+          LISTINGS_PATH: ${{ env.LISTINGS_PATH }}
         run: python .github/scripts/send_todays_listings.py
 
       - name: run recent
@@ -75,6 +80,8 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          TARGET_REPO: 'vanshb03/Summer2026-Internships'
+          LISTINGS_PATH: ${{ env.LISTINGS_PATH }}
           COUNT: ${{ github.event.inputs.count }}
         run: python .github/scripts/send_recent_listings.py
 
@@ -84,10 +91,17 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          TARGET_REPOS: ${{ env.TARGET_REPOS }}
+          WATCH_PATHS: ${{ env.WATCH_PATHS }}
+          LISTINGS_PATH: ${{ env.LISTINGS_PATH }}
+          DATE_FIELD: ${{ env.DATE_FIELD }}
+          DATE_FALLBACK: ${{ env.DATE_FALLBACK }}
+          WINDOW_HOURS: ${{ env.WINDOW_HOURS }}
+          SEEN_TTL_DAYS: ${{ env.SEEN_TTL_DAYS }}
         run: python .github/scripts/watch_repo.py
 
       - name: Save watcher state
         uses: actions/cache/save@v4
         with:
           path: .state
-          key: last-seen-v1
+          key: last-seen-multi-v1
