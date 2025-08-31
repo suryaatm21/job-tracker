@@ -190,6 +190,8 @@ def main() -> int:
                     dedup_key = get_dedup_key(x)
                     if dedup_key and dedup_key not in seen_keys:
                         seen_keys.add(dedup_key)
+                        # Add repo info for source tracking
+                        x["_source_repo"] = repo
                         repo_todays.append(x)
             
             all_todays.extend(repo_todays)
@@ -211,7 +213,10 @@ def main() -> int:
         url = x.get("url", x.get("application_link", ""))
         season = get_unified_season(x)
         season_str = f"[{season}]" if season else ""
-        lines.append(f"• <b>{company}</b> — {title} {season_str}\n{url}".strip())
+        # Add source tag for testing
+        repo_short = x.get("_source_repo", "").split('/')[-1] if x.get("_source_repo") else ""
+        repo_tag = f"[{repo_short}]" if repo_short else ""
+        lines.append(f"• <b>{company}</b> — {title} {season_str} {repo_tag}\n{url}".strip())
 
     header = f"New listings today: {len(all_todays)}"
     send_telegram("\n\n".join([header, *lines]))

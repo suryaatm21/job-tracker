@@ -8,7 +8,7 @@ Environment variables:
 - LISTINGS_PATH: Hint for listings file path (default: ".github/scripts/listings.json")
 - DATE_FIELD: Primary date field (default: "date_posted")
 - DATE_FALLBACK: Fallback date field (default: "date_updated")
-- WINDOW_HOURS: Time window in hours (default: "8")
+- WINDOW_HOURS: Time window in hours (default: "720" for testing - 30 days)
 - COUNT: Max items to include (default: "50")
 - GH_TOKEN: GitHub token for API access
 - TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID: Telegram credentials
@@ -22,7 +22,7 @@ TARGET_REPOS = json.loads(os.environ.get("TARGET_REPOS", '["vanshb03/Summer2026-
 LISTINGS_PATH = os.environ.get("LISTINGS_PATH", ".github/scripts/listings.json")
 DATE_FIELD = os.environ.get("DATE_FIELD", "date_posted")
 DATE_FALLBACK = os.environ.get("DATE_FALLBACK", "date_updated")
-WINDOW_HOURS = int(os.environ.get("WINDOW_HOURS", "8"))
+WINDOW_HOURS = int(os.environ.get("WINDOW_HOURS", "720"))  # Default 30 days for testing
 COUNT = int(os.environ.get("COUNT", "50"))
 
 GH = "https://api.github.com"
@@ -199,10 +199,12 @@ def main():
                         season = get_unified_season(item)  # Use unified season handling
                         
                         season_str = f"[{season}]" if season else ""
+                        # Add source tag for testing to distinguish repos
+                        repo_short = repo.split('/')[-1] if '/' in repo else repo
                         entry = {
                             "key": dedup_key,
                             "dt": dt,
-                            "line": f"• <b>{company}</b> — {title} {season_str}\n{url}".strip(),
+                            "line": f"• <b>{company}</b> — {title} {season_str} [{repo_short}]\n{url}".strip(),
                             "repo": repo
                         }
                         all_entries.append(entry)

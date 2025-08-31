@@ -167,6 +167,8 @@ def main() -> int:
                     dedup_key = get_dedup_key(x)
                     if dedup_key and dedup_key not in seen_keys:
                         seen_keys.add(dedup_key)
+                        # Add repo info for source tracking
+                        x["_source_repo"] = repo
                         repo_items.append(x)
             
             all_items.extend(repo_items)
@@ -194,7 +196,10 @@ def main() -> int:
         ts = sort_key(x)
         when = datetime.utcfromtimestamp(ts).strftime("%Y-%m-%d") if ts > 0 else ""
         season_str = f"[{season}]" if season else ""
-        lines.append(f"• <b>{company}</b> — {title} {season_str} ({when})\n{url}".strip())
+        # Add source tag for testing
+        repo_short = x.get("_source_repo", "").split('/')[-1] if x.get("_source_repo") else ""
+        repo_tag = f"[{repo_short}]" if repo_short else ""
+        lines.append(f"• <b>{company}</b> — {title} {season_str} {repo_tag} ({when})\n{url}".strip())
 
     header = f"Most recent listings: {len(top)}"
     send_telegram("\n\n".join([header, *lines]))
