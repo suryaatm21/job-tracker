@@ -8,32 +8,31 @@ Environment variables:
 - LISTINGS_PATH: Hint for listings file path (default: ".github/scripts/listings.json")
 - DATE_FIELD: Primary date field (default: "date_posted")
 - DATE_FALLBACK: Fallback date field (default: "date_updated")
-- WINDOW_HOURS: Time window in hours (default: "8")
+- WINDOW_HOURS: Time window in hours (default: "4")
 - COUNT: Max items to include (default: "50")
 - GH_TOKEN: GitHub token for API access
 - TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID: Telegram credentials
 """
-import os, json, base64, requests
-from datetime import datetime, timedelta, timezone
+import os, json, base64, requests, time
+from datetime import datetime, timezone, timedelta
 from urllib.parse import urlparse
+from github_helper import fetch_file_json, debug_log, gh_get, GH
+from urllib.parse import urlparse
+from state_utils import (
+    load_seen, save_seen, should_alert_item, 
+    get_cache_key, format_epoch_for_log
+)
 
 # Configuration
 TARGET_REPOS = json.loads(os.environ.get("TARGET_REPOS", '["vanshb03/Summer2026-Internships"]'))
 LISTINGS_PATH = os.environ.get("LISTINGS_PATH", ".github/scripts/listings.json")
 DATE_FIELD = os.environ.get("DATE_FIELD", "date_posted")
 DATE_FALLBACK = os.environ.get("DATE_FALLBACK", "date_updated")
-WINDOW_HOURS = int(os.environ.get("WINDOW_HOURS", "8"))
-COUNT = int(os.environ.get("COUNT", "50") or "50")
+WINDOW_HOURS = int(os.environ.get("WINDOW_HOURS", "4"))  # Default 4 hours for channel digest
+COUNT = int(os.environ.get("COUNT", "50"))
 
-GH = "https://api.github.com"
-HEADERS = {"Accept": "application/vnd.github+json",
-           "Authorization": f"Bearer {os.getenv('GH_TOKEN', '')}"}
-
-def gh_get(url, **params):
-    """Make GitHub API request with error handling"""
-    r = requests.get(url, headers=HEADERS, params=params, timeout=30)
-    r.raise_for_status()
-    return r.json()
+# TTL configuration for seen cache
+SEEN_TTL_DAYS = int(os.environ.get("SEEN_TTL_DAYS", "14"))
 
 def get_default_branch(repo):
     """Get default branch for a repository"""
@@ -58,11 +57,9 @@ def detect_listings_path(repo, branch):
     return LISTINGS_PATH  # fallback to configured path
 
 def get_listings(repo, path, ref=None):
-    """Fetch and parse listings JSON from a repository"""
+    """Fetch and parse listings JSON from a repository using robust helper"""
     try:
-        data = gh_get(f"{GH}/repos/{repo}/contents/{path}", ref=ref)
-        raw = base64.b64decode(data["content"]).decode("utf-8") if data.get("encoding") == "base64" else data["content"]
-        return json.loads(raw)
+        return fetch_file_json(repo, path, ref)
     except Exception as e:
         print(f"Error fetching listings from {repo}:{path} - {e}")
         return []
@@ -79,14 +76,17 @@ def normalize_url(url):
         return url
 
 def get_dedup_key(item):
-    """Get deduplication key: id -> normalized_url -> (company.lower(), title.lower())"""
-    if item.get("id"):
-        return ("id", item["id"])
-    
+    """Get deduplication key: normalized_url -> id -> (company.lower(), title.lower())"""
+    # Prioritize URL over ID since IDs conflict between repos but URLs are more reliable
     norm_url = normalize_url(item.get("url"))
     if norm_url:
         return ("url", norm_url)
     
+    # Only use ID if URL is not available (lower priority due to conflicts)
+    if item.get("id"):
+        return ("id", item["id"])
+    
+    # Final fallback to company+title combination
     company = (item.get("company_name", "") or "").lower().strip()
     title = (item.get("title", "") or "").lower().strip()
     if company and title:
@@ -94,6 +94,20 @@ def get_dedup_key(item):
     
     return None
 
+def get_unified_season(item):
+    """Get unified season label: season field or first term or empty string"""
+    # SimplifyJobs uses 'season' field, Vansh uses 'terms' array
+    if item.get("season"):
+        return item["season"]
+    elif item.get("terms") and len(item["terms"]) > 0:
+        return item["terms"][0]
+    else:
+        return ""
+
+def should_include_listing(item):
+    """Filter out listings with missing/invalid URLs for better quality"""
+    url = item.get("url", "").strip()
+    return bool(url)  # Skip entries with falsy URLs
 def parse_dt(s):
     """Parse date value - supports epoch timestamps and ISO strings"""
     if not s:
@@ -146,6 +160,12 @@ def main():
     """Main function to generate and send multi-repo digest"""
     print(f"Generating digest for repos: {TARGET_REPOS}")
     print(f"Time window: {WINDOW_HOURS} hours, Max items: {COUNT}")
+    print(f"SEEN_TTL_DAYS={SEEN_TTL_DAYS}")
+    
+    # Load seen cache and calculate TTL
+    seen = load_seen()
+    ttl_seconds = SEEN_TTL_DAYS * 24 * 3600
+    now_epoch = int(time.time())
     
     now = datetime.now(timezone.utc)
     cutoff = now - timedelta(hours=WINDOW_HOURS)
@@ -167,31 +187,43 @@ def main():
             
             # Filter and prepare entries
             for item in listings:
+                # Skip items with falsy URLs for better quality
+                if not should_include_listing(item):
+                    continue
+                    
                 dt = parse_dt(item.get(DATE_FIELD)) or parse_dt(item.get(DATE_FALLBACK))
                 if dt and dt >= cutoff:
-                    dedup_key = get_dedup_key(item)
-                    if dedup_key:
-                        company = item.get("company_name", "").strip()
-                        title = item.get("title", "").strip()
-                        url = item.get("url", "").strip()
-                        season = item.get("season", "")
-                        
-                        entry = {
-                            "key": dedup_key,
-                            "dt": dt,
-                            "line": f"• <b>{company}</b> — {title} [{season}]\n{url}",
-                            "repo": repo
-                        }
-                        all_entries.append(entry)
+                    # Check TTL cache to see if we should alert for this item
+                    if should_alert_item(item, seen, ttl_seconds, now_epoch):
+                        dedup_key = get_dedup_key(item)
+                        if dedup_key:
+                            company = item.get("company_name", "").strip()
+                            title = item.get("title", "").strip()
+                            url = item.get("url", "").strip()
+                            season = get_unified_season(item)  # Use unified season handling
+                            
+                            season_str = f"[{season}]" if season else ""
+                            # Add source tag with author name to distinguish repos
+                            repo_author = repo.split('/')[0] if '/' in repo else repo
+                            entry = {
+                                "key": dedup_key,
+                                "dt": dt,
+                                "line": f"• <b>{company}</b> — {title} {season_str} [{repo_author}]\n{url}".strip(),
+                                "repo": repo,
+                                "item": item  # Store item for cache updates
+                            }
+                            all_entries.append(entry)
             
         except Exception as e:
             print(f"Error processing repo {repo}: {e}")
             continue
     
-    print(f"Found {len(all_entries)} entries before deduplication")
+    print(f"Found {len(all_entries)} entries before deduplication and TTL filtering")
     
     if not all_entries:
-        print("No entries found in time window, exiting silently")
+        print("No entries found in time window after TTL filtering, exiting silently")
+        # Still save seen cache to prune old entries
+        save_seen(seen, SEEN_TTL_DAYS)
         return
     
     # Deduplicate by key (keep newest by timestamp)
@@ -210,11 +242,19 @@ def main():
     
     if not deduped_entries:
         print("No entries after deduplication, exiting silently")
+        # Still save seen cache to prune old entries
+        save_seen(seen, SEEN_TTL_DAYS)
         return
     
-    # Sort final entries by timestamp desc and limit to COUNT
-    deduped_entries.sort(key=lambda x: x["dt"], reverse=True)
+    # Sort final entries by company name alphabetically, then by timestamp desc, and limit to COUNT
+    deduped_entries.sort(key=lambda x: (x["line"].split(" — ")[0].replace("• <b>", "").replace("</b>", "").lower(), x["dt"]), reverse=False)
     final_entries = deduped_entries[:COUNT]
+    
+    # Update seen cache for entries we're about to send
+    for entry in final_entries:
+        if "item" in entry:
+            cache_key = get_cache_key(entry["item"])
+            seen[cache_key] = now_epoch
     
     # Build message
     header = f"New internships detected in last {WINDOW_HOURS}h ({len(final_entries)})"
@@ -229,6 +269,10 @@ def main():
         print("Digest sent successfully")
     else:
         print("Failed to send digest")
+    
+    # Save updated seen cache regardless of send success
+    save_seen(seen, SEEN_TTL_DAYS)
+    print(f"Updated seen cache with {len(final_entries)} entries")
 
 if __name__ == "__main__":
     main()

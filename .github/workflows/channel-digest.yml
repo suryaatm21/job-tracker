@@ -24,11 +24,12 @@ permissions:
   contents: read
 
 env:
-  TARGET_REPO: 'vanshb03/Summer2026-Internships'
+  TARGET_REPOS: '["SimplifyJobs/Summer2026-Internships","vanshb03/Summer2026-Internships"]'
   LISTINGS_PATH: '.github/scripts/listings.json'
   DATE_FIELD: 'date_posted'
   DATE_FALLBACK: 'date_updated'
-  WINDOW_HOURS: '4'
+  WINDOW_HOURS: '4'  # 4 hours for regular digest
+  SEEN_TTL_DAYS: '14'  # Channel digest: longer TTL for less frequent updates
 
 jobs:
   digest:
@@ -45,11 +46,14 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID_CHANNEL }}
+          TARGET_REPOS: ${{ env.TARGET_REPOS }}
+          LISTINGS_PATH: ${{ env.LISTINGS_PATH }}
           DATE_FIELD: ${{ env.DATE_FIELD }}
           DATE_FALLBACK: ${{ env.DATE_FALLBACK }}
           WINDOW_HOURS: ${{ env.WINDOW_HOURS }}
+          SEEN_TTL_DAYS: ${{ env.SEEN_TTL_DAYS }}
           COUNT: ${{ github.event.inputs.count }}
-        run: python .github/scripts/send_digest_window.py
+        run: python .github/scripts/send_digest_multi.py
 
       - name: Send latest listing to channel (manual runs only)
         if: github.event_name == 'workflow_dispatch' && github.event.inputs.command == 'latest'
@@ -57,6 +61,8 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID_CHANNEL }}
+          TARGET_REPO: 'vanshb03/Summer2026-Internships'
+          LISTINGS_PATH: ${{ env.LISTINGS_PATH }}
         run: python .github/scripts/send_latest_listing.py
 
       - name: Send today's listings to channel (manual runs only)
@@ -65,6 +71,8 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID_CHANNEL }}
+          TARGET_REPO: 'vanshb03/Summer2026-Internships'
+          LISTINGS_PATH: ${{ env.LISTINGS_PATH }}
         run: python .github/scripts/send_todays_listings.py
 
       - name: Send recent listings to channel (manual runs only)
@@ -73,5 +81,7 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID_CHANNEL }}
+          TARGET_REPO: 'vanshb03/Summer2026-Internships'
+          LISTINGS_PATH: ${{ env.LISTINGS_PATH }}
           COUNT: ${{ github.event.inputs.count }}
         run: python .github/scripts/send_recent_listings.py
