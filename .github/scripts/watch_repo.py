@@ -198,9 +198,9 @@ def get_repo_entries(repo, listings_path, last_seen_sha):
                     url = item.get("url", "")
                     season = get_unified_season(item)  # Use unified season handling
                     season_str = f"[{season}]" if season else ""
-                    # Add source tag for testing to distinguish repos
-                    repo_short = repo.split('/')[-1] if '/' in repo else repo
-                    line = f"• {company} — {title} {season_str} [{repo_short}] {url}".strip()
+                    # Add source tag with author name to distinguish repos
+                    repo_author = repo.split('/')[0] if '/' in repo else repo
+                    line = f"• {company} — {title} {season_str} [{repo_author}] {url}".strip()
                     all_new_entries.append({
                         "key": key,
                         "line": line,
