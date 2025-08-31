@@ -1,8 +1,8 @@
-name: Channel digest (8h)
+name: Channel digest (4h)
 
 on:
   schedule:
-    - cron: '0 */8 * * *'
+    - cron: '0 */4 * * *'
   workflow_dispatch:
     inputs:
       command:
@@ -28,7 +28,7 @@ env:
   LISTINGS_PATH: '.github/scripts/listings.json'
   DATE_FIELD: 'date_posted'
   DATE_FALLBACK: 'date_updated'
-  WINDOW_HOURS: '8'
+  WINDOW_HOURS: '4'
 
 jobs:
   digest:
@@ -39,7 +39,7 @@ jobs:
         with: { python-version: '3.11' }
       - run: pip install requests
 
-      - name: Run 8h digest to channel
+      - name: Run 4h digest to channel
         if: github.event_name == 'schedule' || github.event.inputs.command == 'digest'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -59,7 +59,7 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID_CHANNEL }}
-          TARGET_REPO: "vanshb03/Summer2026-Internships"
+          TARGET_REPO: 'vanshb03/Summer2026-Internships'
           LISTINGS_PATH: ${{ env.LISTINGS_PATH }}
         run: python .github/scripts/send_latest_listing.py
 
@@ -69,7 +69,7 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID_CHANNEL }}
-          TARGET_REPO: "vanshb03/Summer2026-Internships"
+          TARGET_REPO: 'vanshb03/Summer2026-Internships'
           LISTINGS_PATH: ${{ env.LISTINGS_PATH }}
         run: python .github/scripts/send_todays_listings.py
 
@@ -79,7 +79,7 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID_CHANNEL }}
-          TARGET_REPO: "vanshb03/Summer2026-Internships"
+          TARGET_REPO: 'vanshb03/Summer2026-Internships'
           LISTINGS_PATH: ${{ env.LISTINGS_PATH }}
           COUNT: ${{ github.event.inputs.count }}
         run: python .github/scripts/send_recent_listings.py
