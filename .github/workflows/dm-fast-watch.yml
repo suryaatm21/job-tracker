@@ -27,6 +27,7 @@ env:
   DATE_FIELD: 'date_posted'
   DATE_FALLBACK: 'date_updated'
   WINDOW_HOURS: '24'
+  SEEN_TTL_DAYS: '7'  # DM alerts: shorter TTL for frequent updates
 
 jobs:
   watch:
@@ -96,6 +97,7 @@ jobs:
           DATE_FIELD: ${{ env.DATE_FIELD }}
           DATE_FALLBACK: ${{ env.DATE_FALLBACK }}
           WINDOW_HOURS: ${{ env.WINDOW_HOURS }}
+          SEEN_TTL_DAYS: ${{ env.SEEN_TTL_DAYS }}
         run: python .github/scripts/watch_repo.py
 
       - name: Save watcher state

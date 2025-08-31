@@ -2,6 +2,10 @@ import os, json, requests, pathlib, base64, time
 from datetime import datetime
 from urllib.parse import urlparse
 from github_helper import fetch_file_content, fetch_file_json, debug_log, gh_get, GH
+from state_utils import (
+    load_seen, save_seen, should_alert_item, 
+    get_cache_key, format_epoch_for_log
+)
 
 # Multi-repo configuration
 TARGET_REPOS = json.loads(os.environ.get("TARGET_REPOS", '["vanshb03/Summer2026-Internships"]'))
@@ -14,6 +18,9 @@ LISTINGS_PATH = os.getenv("LISTINGS_PATH", ".github/scripts/listings.json")
 DATE_FIELD = os.getenv("DATE_FIELD", "date_posted")
 DATE_FALLBACK = os.getenv("DATE_FALLBACK", "date_updated")
 WINDOW_HOURS = float(os.getenv("WINDOW_HOURS", "720"))  # Only alert for items in last N hours (default 30 days for testing)
+
+# TTL configuration for seen cache
+SEEN_TTL_DAYS = int(os.getenv("SEEN_TTL_DAYS", "14"))
 
 STATE_DIR = pathlib.Path(".state"); STATE_DIR.mkdir(exist_ok=True, parents=True)
 
@@ -125,7 +132,7 @@ def to_epoch(v):
         except Exception:
             return -1
 
-def get_repo_entries(repo, listings_path, last_seen_sha):
+def process_repo_entries(repo, listings_path, last_seen_sha, seen=None, ttl_seconds=None, now_epoch=None):
     """Get new entries from a single repository"""
     debug_log(f"Processing repo: {repo}")
     
@@ -193,20 +200,31 @@ def get_repo_entries(repo, listings_path, last_seen_sha):
                 # Apply time window filter
                 cutoff = time.time() - (WINDOW_HOURS * 3600.0)
                 if ts >= cutoff:
-                    title = item.get("title", "")
-                    company = item.get("company_name", "")
-                    url = item.get("url", "")
-                    season = get_unified_season(item)  # Use unified season handling
-                    season_str = f"[{season}]" if season else ""
-                    # Add source tag with author name to distinguish repos
-                    repo_author = repo.split('/')[0] if '/' in repo else repo
-                    line = f"• {company} — {title} {season_str} [{repo_author}] {url}".strip()
-                    all_new_entries.append({
-                        "key": key,
-                        "line": line,
-                        "ts": ts,
-                        "repo": repo
-                    })
+                    # Check TTL cache to see if we should alert for this item (if TTL enabled)
+                    should_alert = True
+                    if seen is not None and ttl_seconds is not None and now_epoch is not None:
+                        should_alert = should_alert_item(item, seen, ttl_seconds, now_epoch)
+                    
+                    if should_alert:
+                        title = item.get("title", "")
+                        company = item.get("company_name", "")
+                        url = item.get("url", "")
+                        season = get_unified_season(item)  # Use unified season handling
+                        season_str = f"[{season}]" if season else ""
+                        # Add source tag with author name to distinguish repos
+                        repo_author = repo.split('/')[0] if '/' in repo else repo
+                        line = f"• {company} — {title} {season_str} [{repo_author}] {url}".strip()
+                        all_new_entries.append({
+                            "key": key,
+                            "line": line,
+                            "ts": ts,
+                            "repo": repo
+                        })
+                        
+                        # Update seen cache with current timestamp (if TTL enabled)
+                        if seen is not None and now_epoch is not None:
+                            cache_key = get_cache_key(item)
+                            seen[cache_key] = now_epoch
     
     return all_new_entries
 
@@ -214,6 +232,12 @@ def main():
     debug_log(f"Starting multi-repo watch for: {TARGET_REPOS}")
     debug_log(f"Watching paths: {WATCH_PATHS}")
     debug_log(f"Listings file path hint: {LISTINGS_PATH}")
+    debug_log(f"SEEN_TTL_DAYS={SEEN_TTL_DAYS}")
+    
+    # Load seen cache and calculate TTL
+    seen = load_seen()
+    ttl_seconds = SEEN_TTL_DAYS * 24 * 3600
+    now_epoch = int(time.time())
     
     all_entries = []
     
@@ -230,8 +254,8 @@ def main():
             default_branch = get_default_branch(repo)
             listings_path = detect_listings_path(repo, default_branch)
             
-            # Get new entries from this repo
-            repo_entries = get_repo_entries(repo, listings_path, last_seen)
+            # Get new entries from this repo with TTL filtering
+            repo_entries = process_repo_entries(repo, listings_path, last_seen, seen, ttl_seconds, now_epoch)
             all_entries.extend(repo_entries)
             
             # Update last seen SHA for this repo
@@ -247,8 +271,10 @@ def main():
     
     if not all_entries:
         debug_log("No new entries found across all repos")
+        # Still save seen cache to prune old entries
+        save_seen(seen, SEEN_TTL_DAYS)
         return
-    
+
     debug_log(f"Found {len(all_entries)} new entries before deduplication")
     
     # Deduplicate across all repos (keep first occurrence by timestamp desc)
@@ -265,18 +291,51 @@ def main():
     
     debug_log(f"After deduplication: {len(deduped_entries)} unique entries")
     
-    if deduped_entries:
-        # Sort final entries by timestamp desc and take up to 10
-        deduped_entries.sort(key=lambda x: x["ts"], reverse=True)
-        lines = [entry["line"] for entry in deduped_entries[:10]]
+    # Apply TTL-based filtering
+    final_entries = []
+    for entry in deduped_entries:
+        # Reconstruct item dict for TTL checking (we need the raw item data)
+        # Note: This is a simplified approach - in practice, we'd need to pass the item through
+        # For now, we'll create a minimal item dict from the entry data
+        cache_key = entry["key"][1] if isinstance(entry["key"], tuple) else str(entry["key"])
         
-        header = f"New internships detected ({len(deduped_entries)})"
+        # Check TTL (simplified - assumes entry represents a valid item)
+        last_alert = seen.get(cache_key)
+        should_alert = True
+        reason = "new"
+        
+        if last_alert is not None:
+            if now_epoch - last_alert <= ttl_seconds:
+                should_alert = False
+                reason = "suppressed"
+                debug_log(f"SUPPRESS key={cache_key} last={format_epoch_for_log(last_alert)} ttl={SEEN_TTL_DAYS}d")
+            else:
+                reason = "ttl_expired"
+        
+        if should_alert:
+            final_entries.append(entry)
+            # Mark as seen for future runs
+            seen[cache_key] = now_epoch
+            if reason == "ttl_expired":
+                debug_log(f"ALLOW-TTL key={cache_key} last={format_epoch_for_log(last_alert)} ttl={SEEN_TTL_DAYS}d")
+    
+    debug_log(f"After TTL filtering: {len(final_entries)} entries to alert")
+    
+    if final_entries:
+        # Sort final entries by company name alphabetically, then by timestamp desc
+        final_entries.sort(key=lambda x: (x["line"].split(" — ")[0].replace("• ", "").lower(), -x["ts"]))
+        lines = [entry["line"] for entry in final_entries[:10]]
+        
+        header = f"New internships detected ({len(final_entries)})"
         message = "\n".join([header] + lines)
         
         debug_log(f"Sending message with {len(lines)} lines")
         send_telegram(message)
     else:
-        debug_log("No messages to send after deduplication")
+        debug_log("No messages to send after TTL filtering")
+    
+    # Save updated seen cache
+    save_seen(seen, SEEN_TTL_DAYS)
 
 if __name__ == "__main__":
     main()
