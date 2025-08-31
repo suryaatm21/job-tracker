@@ -189,12 +189,12 @@ def main():
                         season = get_unified_season(item)  # Use unified season handling
                         
                         season_str = f"[{season}]" if season else ""
-                        # Add source tag for testing to distinguish repos
-                        repo_short = repo.split('/')[-1] if '/' in repo else repo
+                        # Add source tag with author name to distinguish repos
+                        repo_author = repo.split('/')[0] if '/' in repo else repo
                         entry = {
                             "key": dedup_key,
                             "dt": dt,
-                            "line": f"• <b>{company}</b> — {title} {season_str} [{repo_short}]\n{url}".strip(),
+                            "line": f"• <b>{company}</b> — {title} {season_str} [{repo_author}]\n{url}".strip(),
                             "repo": repo
                         }
                         all_entries.append(entry)

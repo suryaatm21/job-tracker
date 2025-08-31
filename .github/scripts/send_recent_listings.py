@@ -182,9 +182,9 @@ def main() -> int:
         ts = sort_key(x)
         when = datetime.utcfromtimestamp(ts).strftime("%Y-%m-%d") if ts > 0 else ""
         season_str = f"[{season}]" if season else ""
-        # Add source tag for testing
-        repo_short = x.get("_source_repo", "").split('/')[-1] if x.get("_source_repo") else ""
-        repo_tag = f"[{repo_short}]" if repo_short else ""
+        # Add source tag with author name to distinguish repos
+        repo_author = x.get("_source_repo", "").split('/')[0] if x.get("_source_repo") else ""
+        repo_tag = f"[{repo_author}]" if repo_author else ""
         lines.append(f"• <b>{company}</b> — {title} {season_str} {repo_tag} ({when})\n{url}".strip())
 
     header = f"Most recent listings: {len(top)}"
