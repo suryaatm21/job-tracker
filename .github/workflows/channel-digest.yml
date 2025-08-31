@@ -29,6 +29,7 @@ env:
   DATE_FIELD: 'date_posted'
   DATE_FALLBACK: 'date_updated'
   WINDOW_HOURS: '720'  # 30 days for testing
+  SEEN_TTL_DAYS: '14'  # Channel digest: longer TTL for less frequent updates
 
 jobs:
   digest:
@@ -50,6 +51,7 @@ jobs:
           DATE_FIELD: ${{ env.DATE_FIELD }}
           DATE_FALLBACK: ${{ env.DATE_FALLBACK }}
           WINDOW_HOURS: ${{ env.WINDOW_HOURS }}
+          SEEN_TTL_DAYS: ${{ env.SEEN_TTL_DAYS }}
           COUNT: ${{ github.event.inputs.count }}
         run: python .github/scripts/send_digest_multi.py
 
