@@ -1,3 +1,4 @@
 # State directory for local development - Actions uses cache
 .state/
 .env
+__pycache__/

@@ -13,8 +13,10 @@ Environment variables:
 - GH_TOKEN: GitHub token for API access
 - TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID: Telegram credentials
 """
-import os, json, base64, requests
-from datetime import datetime, timedelta, timezone
+import os, json, base64, requests, time
+from datetime import datetime, timezone, timedelta
+from urllib.parse import urlparse
+from github_helper import fetch_file_json, debug_log, gh_get, GH
 from urllib.parse import urlparse
 
 # Configuration
@@ -24,16 +26,6 @@ DATE_FIELD = os.environ.get("DATE_FIELD", "date_posted")
 DATE_FALLBACK = os.environ.get("DATE_FALLBACK", "date_updated")
 WINDOW_HOURS = int(os.environ.get("WINDOW_HOURS", "720"))  # Default 30 days for testing
 COUNT = int(os.environ.get("COUNT", "50"))
-
-GH = "https://api.github.com"
-HEADERS = {"Accept": "application/vnd.github+json",
-           "Authorization": f"Bearer {os.getenv('GH_TOKEN', '')}"}
-
-def gh_get(url, **params):
-    """Make GitHub API request with error handling"""
-    r = requests.get(url, headers=HEADERS, params=params, timeout=30)
-    r.raise_for_status()
-    return r.json()
 
 def get_default_branch(repo):
     """Get default branch for a repository"""
@@ -58,11 +50,9 @@ def detect_listings_path(repo, branch):
     return LISTINGS_PATH  # fallback to configured path
 
 def get_listings(repo, path, ref=None):
-    """Fetch and parse listings JSON from a repository"""
+    """Fetch and parse listings JSON from a repository using robust helper"""
     try:
-        data = gh_get(f"{GH}/repos/{repo}/contents/{path}", ref=ref)
-        raw = base64.b64decode(data["content"]).decode("utf-8") if data.get("encoding") == "base64" else data["content"]
-        return json.loads(raw)
+        return fetch_file_json(repo, path, ref)
     except Exception as e:
         print(f"Error fetching listings from {repo}:{path} - {e}")
         return []

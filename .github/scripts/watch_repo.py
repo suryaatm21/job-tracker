@@ -1,13 +1,11 @@
 import os, json, requests, pathlib, base64, time
 from datetime import datetime
 from urllib.parse import urlparse
+from github_helper import fetch_file_content, fetch_file_json, debug_log, gh_get, GH
 
 # Multi-repo configuration
 TARGET_REPOS = json.loads(os.environ.get("TARGET_REPOS", '["vanshb03/Summer2026-Internships"]'))
 WATCH_PATHS = set(json.loads(os.environ.get("WATCH_PATHS", '["listings.json"]')))
-GH = "https://api.github.com"
-HEADERS = {"Authorization": f"Bearer {os.getenv('GH_TOKEN','')}",
-           "Accept": "application/vnd.github+json"}
 
 # Path to the listings file within each repo
 LISTINGS_PATH = os.getenv("LISTINGS_PATH", ".github/scripts/listings.json")
@@ -17,54 +15,38 @@ DATE_FIELD = os.getenv("DATE_FIELD", "date_posted")
 DATE_FALLBACK = os.getenv("DATE_FALLBACK", "date_updated")
 WINDOW_HOURS = float(os.getenv("WINDOW_HOURS", "720"))  # Only alert for items in last N hours (default 30 days for testing)
 
-def debug_log(msg):
-    print(f"[{datetime.now().isoformat()}] DEBUG: {msg}")
-
 STATE_DIR = pathlib.Path(".state"); STATE_DIR.mkdir(exist_ok=True, parents=True)
-
-def gh(url, **params):
-    r = requests.get(url, headers=HEADERS, params=params)
-    r.raise_for_status()
-    return r.json()
 
 def get_default_branch(repo):
     """Get default branch for a repository"""
-    repo_info = gh(f"{GH}/repos/{repo}")
+    repo_info = gh_get(f"{GH}/repos/{repo}")
     return repo_info["default_branch"]
 
 def detect_listings_path(repo, branch):
-    """Try to find listings file in repo, trying LISTINGS_PATH first, then fallbacks"""
-    paths_to_try = [LISTINGS_PATH, ".github/scripts/listings.json", "listings.json"]
-    
-    for path in paths_to_try:
+    """Auto-detect listings.json path within repo"""
+    for path in [".github/scripts/listings.json", "listings.json"]:
         try:
-            gh(f"{GH}/repos/{repo}/contents/{path}", ref=branch)
-            debug_log(f"Found listings file at {path} in {repo}")
+            gh_get(f"{GH}/repos/{repo}/contents/{path}", ref=branch)
             return path
         except requests.HTTPError as e:
-            if e.response.status_code == 404:
-                continue
-            raise
-    
-    debug_log(f"Warning: Could not find listings file in {repo}")
-    return LISTINGS_PATH  # fallback to configured path
+            if e.response.status_code != 404:
+                raise
+    return LISTINGS_PATH  # fallback
 
-def list_commits(repo, per_page=15):
-    return gh(f"{GH}/repos/{repo}/commits", per_page=per_page)
+def get_repo_entries(repo, per_page=100):
+    """Fetch commits for a repository"""
+    return gh_get(f"{GH}/repos/{repo}/commits", per_page=per_page)
 
 def commit_detail(repo, sha):
-    return gh(f"{GH}/repos/{repo}/commits/{sha}")
+    return gh_get(f"{GH}/repos/{repo}/commits/{sha}")
 
 def get_file_at(repo, ref, path):
-    """GET /repos/{owner}/{repo}/contents/{path}?ref={ref}"""
+    """Fetch file content at specific git reference using robust helper"""
     try:
-        data = gh(f"{GH}/repos/{repo}/contents/{path}", ref=ref)
-        if data.get("encoding") == "base64":
-            return base64.b64decode(data["content"]).decode("utf-8")
-        return data["content"]
-    except requests.HTTPError as e:
+        return fetch_file_content(repo, path, ref)
+    except Exception as e:
         # file might not exist in older commit
-        if e.response.status_code == 404:
+        if "404" in str(e):
             return None
         raise
 
@@ -147,7 +129,7 @@ def get_repo_entries(repo, listings_path, last_seen_sha):
     """Get new entries from a single repository"""
     debug_log(f"Processing repo: {repo}")
     
-    commits = list_commits(repo, per_page=20)
+    commits = get_repo_entries(repo, per_page=20)
     if not commits:
         debug_log(f"No commits found in {repo}")
         return []
@@ -253,7 +235,7 @@ def main():
             all_entries.extend(repo_entries)
             
             # Update last seen SHA for this repo
-            commits = list_commits(repo, per_page=1)
+            commits = get_repo_entries(repo, per_page=1)
             if commits:
                 newest_sha = commits[0]["sha"]
                 last_file.write_text(newest_sha)
