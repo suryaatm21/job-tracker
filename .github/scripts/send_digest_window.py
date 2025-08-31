@@ -6,7 +6,7 @@ LISTINGS_PATH = os.environ.get("LISTINGS_PATH","listings.json")
 DATE_FIELD    = os.environ.get("DATE_FIELD","date_posted")
 DATE_FALLBACK = os.environ.get("DATE_FALLBACK","date_updated")
 WINDOW_HOURS  = int(os.environ.get("WINDOW_HOURS","8"))
-COUNT         = int(os.environ.get("COUNT","50"))
+COUNT         = int(os.environ.get("COUNT","50") or "50")
 
 GH = "https://api.github.com"
 HEADERS = {"Accept":"application/vnd.github+json",
