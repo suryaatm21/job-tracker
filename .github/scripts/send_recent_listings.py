@@ -168,8 +168,8 @@ def main() -> int:
         send_telegram("No recent listings found.")
         return 0
 
-    # Sort by timestamp descending and take top COUNT
-    sorted_items = sorted(all_items, key=sort_key, reverse=True)
+    # Sort by company name alphabetically, then by timestamp descending
+    sorted_items = sorted(all_items, key=lambda x: (x.get("company_name", x.get("company", "")).lower(), -sort_key(x)))
     top = sorted_items[:COUNT]
 
     lines = []

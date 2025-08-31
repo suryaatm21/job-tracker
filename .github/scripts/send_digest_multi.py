@@ -247,8 +247,8 @@ def main():
         save_seen(seen, SEEN_TTL_DAYS)
         return
     
-    # Sort final entries by timestamp desc and limit to COUNT
-    deduped_entries.sort(key=lambda x: x["dt"], reverse=True)
+    # Sort final entries by company name alphabetically, then by timestamp desc, and limit to COUNT
+    deduped_entries.sort(key=lambda x: (x["line"].split(" — ")[0].replace("• <b>", "").replace("</b>", "").lower(), x["dt"]), reverse=False)
     final_entries = deduped_entries[:COUNT]
     
     # Update seen cache for entries we're about to send

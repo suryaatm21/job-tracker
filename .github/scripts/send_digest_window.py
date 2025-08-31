@@ -51,9 +51,10 @@ def main():
             title   = x.get("title","").strip()
             url     = x.get("url","").strip()
             season  = x.get("season","")
-            rows.append((dt, f"• {company} — {title} [{season}] {url}"))
+            rows.append((dt, f"• {company} — {title} [{season}] {url}", company))
 
-    rows.sort(key=lambda t: t[0], reverse=True)
+    # Sort by company name alphabetically, then by timestamp desc
+    rows.sort(key=lambda t: (t[2].lower(), -t[0].timestamp()))
     if not rows:
         return  # silent when no new items
 
