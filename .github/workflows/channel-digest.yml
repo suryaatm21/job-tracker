@@ -28,7 +28,7 @@ env:
   LISTINGS_PATH: '.github/scripts/listings.json'
   DATE_FIELD: 'date_posted'
   DATE_FALLBACK: 'date_updated'
-  WINDOW_HOURS: '720'  # 30 days for testing
+  WINDOW_HOURS: '4'  # 4 hours for regular digest
   SEEN_TTL_DAYS: '14'  # Channel digest: longer TTL for less frequent updates
 
 jobs:

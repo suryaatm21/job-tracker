@@ -186,6 +186,9 @@ def main() -> int:
         send_telegram("No new listings posted today.")
         return 0
 
+    # Sort by company name alphabetically
+    all_todays.sort(key=lambda x: x.get("company_name", x.get("company", "")).lower())
+
     lines = []
     for x in all_todays[:15]:  # Limit to 15 entries
         title = x.get("title", "")
