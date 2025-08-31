@@ -13,8 +13,7 @@ Configuration via environment variables:
 import os, json, base64, requests
 from datetime import datetime
 from urllib.parse import urlparse
-
-GH = "https://api.github.com"
+from github_helper import fetch_file_content, fetch_file_json, debug_log, gh_get, GH
 
 # Multi-repo support with fallback to single repo
 TARGET_REPOS_STR = os.getenv("TARGET_REPOS")
@@ -28,38 +27,25 @@ LISTINGS_PATH = os.getenv("LISTINGS_PATH", "listings.json")
 DATE_FIELD = os.getenv("DATE_FIELD", "date_posted")
 DATE_FALLBACK = os.getenv("DATE_FALLBACK", "date_updated")
 COUNT = max(1, int(os.getenv("COUNT", "10") or 10))
-HEADERS = {
-    "Authorization": f"Bearer {os.getenv('GH_TOKEN','')}",
-    "Accept": "application/vnd.github+json",
-}
-
-def gh(url: str, **params):
-    r = requests.get(url, headers=HEADERS, params=params, timeout=30)
-    r.raise_for_status()
-    return r.json()
 
 def detect_listings_path(repo, branch="main"):
     """Auto-detect listings.json path within repo"""
     try:
         # Try listings.json in root first
-        gh(f"{GH}/repos/{repo}/contents/listings.json", ref=branch)
+        gh_get(f"{GH}/repos/{repo}/contents/listings.json", ref=branch)
         return "listings.json"
     except Exception:
         try:
             # Try in .github folder
-            gh(f"{GH}/repos/{repo}/contents/.github/listings.json", ref=branch)
+            gh_get(f"{GH}/repos/{repo}/contents/.github/listings.json", ref=branch)
             return ".github/listings.json"
         except Exception:
             # Default fallback
             return "listings.json"
 
 def get_file(repo, path: str, ref: str | None = None) -> str:
-    data = gh(f"{GH}/repos/{repo}/contents/{path}", ref=ref)
-    if isinstance(data, dict) and data.get("encoding") == "base64":
-        return base64.b64decode(data["content"]).decode("utf-8")
-    if isinstance(data, dict) and "content" in data:
-        return data["content"]
-    raise RuntimeError("Unexpected response for contents API")
+    """Fetch a file's content from a repo at optional ref using robust helper"""
+    return fetch_file_content(repo, path, ref)
 
 def normalize_url(url):
     """Normalize URL to scheme+host+path for deduplication"""
