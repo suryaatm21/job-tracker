@@ -79,20 +79,38 @@ def normalize_url(url):
         return url
 
 def get_dedup_key(item):
-    """Get deduplication key: id -> normalized_url -> (company.lower(), title.lower())"""
-    if item.get("id"):
-        return ("id", item["id"])
-    
+    """Get deduplication key: normalized_url -> id -> (company.lower(), title.lower())"""
+    # Prioritize URL over ID since IDs conflict between repos but URLs are more reliable
     norm_url = normalize_url(item.get("url"))
     if norm_url:
         return ("url", norm_url)
     
+    # Only use ID if URL is not available (lower priority due to conflicts)
+    if item.get("id"):
+        return ("id", item["id"])
+    
+    # Final fallback to company+title combination
     company = (item.get("company_name", "") or "").lower().strip()
     title = (item.get("title", "") or "").lower().strip()
     if company and title:
         return ("company_title", (company, title))
     
     return None
+
+def get_unified_season(item):
+    """Get unified season label: season field or first term or empty string"""
+    # SimplifyJobs uses 'season' field, Vansh uses 'terms' array
+    if item.get("season"):
+        return item["season"]
+    elif item.get("terms") and len(item["terms"]) > 0:
+        return item["terms"][0]
+    else:
+        return ""
+
+def should_include_listing(item):
+    """Filter out listings with missing/invalid URLs for better quality"""
+    url = item.get("url", "").strip()
+    return bool(url)  # Skip entries with falsy URLs
 
 def parse_dt(s):
     """Parse date value - supports epoch timestamps and ISO strings"""
@@ -167,6 +185,10 @@ def main():
             
             # Filter and prepare entries
             for item in listings:
+                # Skip items with falsy URLs for better quality
+                if not should_include_listing(item):
+                    continue
+                    
                 dt = parse_dt(item.get(DATE_FIELD)) or parse_dt(item.get(DATE_FALLBACK))
                 if dt and dt >= cutoff:
                     dedup_key = get_dedup_key(item)
@@ -174,12 +196,13 @@ def main():
                         company = item.get("company_name", "").strip()
                         title = item.get("title", "").strip()
                         url = item.get("url", "").strip()
-                        season = item.get("season", "")
+                        season = get_unified_season(item)  # Use unified season handling
                         
+                        season_str = f"[{season}]" if season else ""
                         entry = {
                             "key": dedup_key,
                             "dt": dt,
-                            "line": f"• <b>{company}</b> — {title} [{season}]\n{url}",
+                            "line": f"• <b>{company}</b> — {title} {season_str}\n{url}".strip(),
                             "repo": repo
                         }
                         all_entries.append(entry)

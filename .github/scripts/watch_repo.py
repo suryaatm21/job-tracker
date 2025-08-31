@@ -100,20 +100,38 @@ def normalize_url(url):
         return url
 
 def get_dedup_key(item):
-    """Get deduplication key: id -> normalized_url -> (company.lower(), title.lower())"""
-    if item.get("id"):
-        return ("id", item["id"])
-    
+    """Get deduplication key: normalized_url -> id -> (company.lower(), title.lower())"""
+    # Prioritize URL over ID since IDs conflict between repos but URLs are more reliable
     norm_url = normalize_url(item.get("url"))
     if norm_url:
         return ("url", norm_url)
     
+    # Only use ID if URL is not available (lower priority due to conflicts)
+    if item.get("id"):
+        return ("id", item["id"])
+    
+    # Final fallback to company+title combination
     company = (item.get("company_name", "") or "").lower().strip()
     title = (item.get("title", "") or "").lower().strip()
     if company and title:
         return ("company_title", (company, title))
     
     return None
+
+def get_unified_season(item):
+    """Get unified season label: season field or first term or empty string"""
+    # SimplifyJobs uses 'season' field, Vansh uses 'terms' array
+    if item.get("season"):
+        return item["season"]
+    elif item.get("terms") and len(item["terms"]) > 0:
+        return item["terms"][0]
+    else:
+        return ""
+
+def should_include_listing(item):
+    """Filter out listings with missing/invalid URLs for better quality"""
+    url = item.get("url", "").strip()
+    return bool(url)  # Skip entries with falsy URLs
 
 def to_epoch(v):
     try:
@@ -179,8 +197,12 @@ def get_repo_entries(repo, listings_path, last_seen_sha):
             continue
         
         # Find new entries in this commit
-        before_keys = {get_dedup_key(x) for x in before if get_dedup_key(x)}
+        before_keys = {get_dedup_key(x) for x in before if get_dedup_key(x) and should_include_listing(x)}
         for item in after:
+            # Skip items with falsy URLs for better quality
+            if not should_include_listing(item):
+                continue
+                
             key = get_dedup_key(item)
             if key and key not in before_keys:
                 ts_val = item.get(DATE_FIELD, item.get(DATE_FALLBACK))
@@ -192,8 +214,9 @@ def get_repo_entries(repo, listings_path, last_seen_sha):
                     title = item.get("title", "")
                     company = item.get("company_name", "")
                     url = item.get("url", "")
-                    season = item.get("season", "")
-                    line = f"• {company} — {title} [{season}] {url}"
+                    season = get_unified_season(item)  # Use unified season handling
+                    season_str = f"[{season}]" if season else ""
+                    line = f"• {company} — {title} {season_str} {url}".strip()
                     all_new_entries.append({
                         "key": key,
                         "line": line,
