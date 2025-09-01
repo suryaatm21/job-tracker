@@ -4,7 +4,7 @@ from urllib.parse import urlparse
 from github_helper import fetch_file_content, fetch_file_json, debug_log, gh_get, GH
 from state_utils import (
     load_seen, save_seen, should_alert_item, 
-    get_cache_key, format_epoch_for_log
+    get_cache_key, format_epoch_for_log, should_include_item
 )
 
 # Multi-repo configuration
@@ -17,7 +17,7 @@ LISTINGS_PATH = os.getenv("LISTINGS_PATH", ".github/scripts/listings.json")
 # Date configuration for filtering new listings
 DATE_FIELD = os.getenv("DATE_FIELD", "date_posted")
 DATE_FALLBACK = os.getenv("DATE_FALLBACK", "date_updated")
-WINDOW_HOURS = float(os.getenv("WINDOW_HOURS", "720"))  # Only alert for items in last N hours (default 30 days for testing)
+WINDOW_HOURS = float(os.getenv("WINDOW_HOURS", "24"))  # Only alert for items in last N hours (default 24 hours)
 
 # TTL configuration for seen cache
 SEEN_TTL_DAYS = int(os.getenv("SEEN_TTL_DAYS", "14"))
@@ -117,11 +117,6 @@ def get_unified_season(item):
     else:
         return ""
 
-def should_include_listing(item):
-    """Filter out listings with missing/invalid URLs for better quality"""
-    url = item.get("url", "").strip()
-    return bool(url)  # Skip entries with falsy URLs
-
 def to_epoch(v):
     try:
         return int(v)
@@ -186,10 +181,10 @@ def process_repo_entries(repo, listings_path, last_seen_sha, seen=None, ttl_seco
             continue
         
         # Find new entries in this commit
-        before_keys = {get_dedup_key(x) for x in before if get_dedup_key(x) and should_include_listing(x)}
+        before_keys = {get_dedup_key(x) for x in before if get_dedup_key(x) and should_include_item(x)}
         for item in after:
-            # Skip items with falsy URLs for better quality
-            if not should_include_listing(item):
+            # Skip items with falsy URLs or marked as not visible
+            if not should_include_item(item):
                 continue
                 
             key = get_dedup_key(item)
@@ -238,6 +233,34 @@ def main():
     seen = load_seen()
     ttl_seconds = SEEN_TTL_DAYS * 24 * 3600
     now_epoch = int(time.time())
+    
+    # If cache is empty (first run or after reset), pre-populate with recent jobs
+    # to avoid alerting on old listings
+    if not seen:
+        debug_log("TTL cache is empty, pre-populating with recent jobs to avoid old alerts")
+        for repo in TARGET_REPOS:
+            try:
+                default_branch = get_default_branch(repo)
+                listings_path = detect_listings_path(repo, default_branch)
+                listings = fetch_file_json(repo, listings_path, default_branch)
+                
+                # Pre-populate cache with jobs from last 7 days
+                cutoff = now_epoch - (7 * 24 * 3600)  # 7 days ago
+                for item in listings[:100]:  # Limit to avoid processing too many
+                    if should_include_item(item):
+                        ts_val = item.get(DATE_FIELD, item.get(DATE_FALLBACK))
+                        ts = to_epoch(ts_val)
+                        if ts >= cutoff:  # Only cache recent items
+                            cache_key = get_cache_key(item)
+                            seen[cache_key] = now_epoch
+                            
+                debug_log(f"Pre-populated {len([k for k in seen.keys()])} recent items from {repo}")
+            except Exception as e:
+                debug_log(f"Failed to pre-populate cache from {repo}: {e}")
+        
+        if seen:
+            save_seen(seen, SEEN_TTL_DAYS)
+            debug_log(f"Saved pre-populated cache with {len(seen)} items")
     
     all_entries = []
     
