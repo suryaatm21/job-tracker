@@ -2,6 +2,12 @@
 
 A Telegram bot that notifies you when new internship listings are added to the `listings.json` file in target GitHub repositories with GitHub Actions running at a set interval of time.
 
+---
+
+👉 [Get it at resources.theuntab.com](https://resources.theuntab.com)
+
+---
+
 ## Features
 
 - Sends a Telegram DM when new listings are detected across multiple repositories.
