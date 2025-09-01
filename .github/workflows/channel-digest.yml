@@ -40,6 +40,14 @@ jobs:
         with: { python-version: '3.11' }
       - run: pip install requests
 
+      # Use separate cache for channel digest TTL state
+      - name: Restore channel digest state
+        id: cache-restore
+        uses: actions/cache/restore@v4
+        with:
+          path: .state
+          key: channel-digest-ttl-v1
+
       - name: Run 4h digest to channel
         if: github.event_name == 'schedule' || github.event.inputs.command == 'digest'
         env:
@@ -85,3 +93,11 @@ jobs:
           LISTINGS_PATH: ${{ env.LISTINGS_PATH }}
           COUNT: ${{ github.event.inputs.count }}
         run: python .github/scripts/send_recent_listings.py
+
+      # Save channel digest TTL state (separate from DM watcher)
+      - name: Save channel digest state
+        if: always()
+        uses: actions/cache/save@v4
+        with:
+          path: .state
+          key: channel-digest-ttl-v1
