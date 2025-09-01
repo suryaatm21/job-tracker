@@ -14,6 +14,7 @@ import os, json, base64, requests
 from datetime import datetime
 from urllib.parse import urlparse
 from github_helper import fetch_file_content, fetch_file_json, debug_log, gh_get, GH
+from format_utils import format_location, format_job_line
 
 # Multi-repo support with fallback to single repo
 TARGET_REPOS_STR = os.getenv("TARGET_REPOS")
@@ -179,14 +180,26 @@ def main() -> int:
         company = x.get("company_name", x.get("company", ""))
         url = x.get("url", x.get("application_link", ""))
         season = get_unified_season(x)
+        
+        # Format location - use "dm" mode for manual commands to provide specific location info
+        locations = x.get("locations", [])
+        location = format_location(locations, mode="dm")
+        
         # Include a relative date if available
         ts = sort_key(x)
         when = datetime.utcfromtimestamp(ts).strftime("%Y-%m-%d") if ts > 0 else ""
-        season_str = f"[{season}]" if season else ""
+        
         # Add source tag with author name to distinguish repos
         repo_author = x.get("_source_repo", "").split('/')[0] if x.get("_source_repo") else ""
-        repo_tag = f"[{repo_author}]" if repo_author else ""
-        lines.append(f"• <b>{company}</b> — {title} {season_str} {repo_tag} ({when})\n{url}".strip())
+        
+        # Format the line using the helper, then add date info
+        line = format_job_line(company, title, season, location, url, repo_author, html=True)
+        if when:
+            # Insert the date before the URL
+            line_parts = line.split('\n')
+            if len(line_parts) == 2:
+                line = f"{line_parts[0]} ({when})\n{line_parts[1]}"
+        lines.append(line)
 
     # Add context prefix if provided
     prefix = f"{MESSAGE_PREFIX}: " if MESSAGE_PREFIX else ""

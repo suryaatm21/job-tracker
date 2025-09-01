@@ -19,6 +19,7 @@ import os, json, base64, requests
 from datetime import datetime, timezone
 from urllib.parse import urlparse
 from github_helper import fetch_file_content, fetch_file_json, debug_log, gh_get, GH
+from format_utils import format_location, format_job_line
 
 # Multi-repo support with fallback to single repo
 TARGET_REPOS_STR = os.getenv("TARGET_REPOS")
@@ -197,11 +198,15 @@ def main() -> int:
         company = x.get("company_name", x.get("company", ""))
         url = x.get("url", x.get("application_link", ""))
         season = get_unified_season(x)
-        season_str = f"[{season}]" if season else ""
+        
+        # Format location - use "dm" mode for manual commands to provide specific location info
+        locations = x.get("locations", [])
+        location = format_location(locations, mode="dm")
+        
         # Add source tag with author name to distinguish repos
         repo_author = x.get("_source_repo", "").split('/')[0] if x.get("_source_repo") else ""
-        repo_tag = f"[{repo_author}]" if repo_author else ""
-        lines.append(f"• <b>{company}</b> — {title} {season_str} {repo_tag}\n{url}".strip())
+        line = format_job_line(company, title, season, location, url, repo_author, html=True)
+        lines.append(line)
 
     # Add context prefix if provided
     prefix = f"{MESSAGE_PREFIX}: " if MESSAGE_PREFIX else ""

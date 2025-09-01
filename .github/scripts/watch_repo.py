@@ -6,6 +6,7 @@ from state_utils import (
     load_seen, save_seen, should_alert_item, 
     get_cache_key, format_epoch_for_log, should_include_item
 )
+from format_utils import format_location, log_location_resolution, format_job_line
 
 # Multi-repo configuration
 TARGET_REPOS = json.loads(os.environ.get("TARGET_REPOS", '["vanshb03/Summer2026-Internships"]'))
@@ -207,10 +208,18 @@ def process_repo_entries(repo, listings_path, last_seen_sha, seen=None, ttl_seco
                         company = item.get("company_name", "")
                         url = item.get("url", "")
                         season = get_unified_season(item)  # Use unified season handling
-                        season_str = f"[{season}]" if season else ""
+                        
+                        # Format location with DM mode (CA/NY/NJ resolution)
+                        locations = item.get("locations", [])
+                        location = format_location(locations, mode="dm")
+                        
+                        # Log location resolution for debugging
+                        if locations and len(locations) > 1:
+                            log_location_resolution(company, title, locations, location, "dm")
+                        
                         # Add source tag with author name to distinguish repos
                         repo_author = repo.split('/')[0] if '/' in repo else repo
-                        line = f"• {company} — {title} {season_str} [{repo_author}] {url}".strip()
+                        line = format_job_line(company, title, season, location, url, repo_author, html=False)
                         all_new_entries.append({
                             "key": key,
                             "line": line,
