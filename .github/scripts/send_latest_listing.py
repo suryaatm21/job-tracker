@@ -4,6 +4,7 @@ Fetch the latest listing from the target repository's listings file and send it 
 Relies on env vars: TARGET_REPO, LISTINGS_PATH (default listings.json), GH_TOKEN, TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID
 """
 import os, json, base64, requests
+from format_utils import format_location, format_job_line
 
 GH = "https://api.github.com"
 TARGET_REPO = os.environ["TARGET_REPO"]
@@ -78,9 +79,17 @@ def main():
     url = latest.get("url", latest.get("application_link", ""))
     season = latest.get("season", "")
     
+    # Format location - use "dm" mode for manual commands to provide specific location info
+    locations = latest.get("locations", [])
+    location = format_location(locations, mode="dm")
+    
+    # Use format_job_line for consistent formatting
+    repo_author = TARGET_REPO.split('/')[0] if '/' in TARGET_REPO else TARGET_REPO
+    formatted_line = format_job_line(company, title, season, location, url, repo_author, html=False)
+    
     # Add context prefix if provided
     prefix = f"{MESSAGE_PREFIX}: " if MESSAGE_PREFIX else ""
-    text = f"{prefix}Latest listing: {company} — {title} [{season}]\n{url}"
+    text = f"{prefix}Latest listing:\n{formatted_line}"
     send_telegram(text)
     return 0
 

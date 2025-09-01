@@ -22,6 +22,7 @@ from state_utils import (
     load_seen, save_seen, should_alert_item, 
     get_cache_key, format_epoch_for_log
 )
+from format_utils import format_location, log_location_resolution, format_job_line
 
 # Configuration
 TARGET_REPOS = json.loads(os.environ.get("TARGET_REPOS", '["vanshb03/Summer2026-Internships"]'))
@@ -208,13 +209,17 @@ def main():
                             url = item.get("url", "").strip()
                             season = get_unified_season(item)  # Use unified season handling
                             
-                            season_str = f"[{season}]" if season else ""
+                            # Format location with digest mode (always "Multi-location" if multiple)
+                            locations = item.get("locations", [])
+                            location = format_location(locations, mode="digest")
+                            
                             # Add source tag with author name to distinguish repos
                             repo_author = repo.split('/')[0] if '/' in repo else repo
+                            line = format_job_line(company, title, season, location, url, repo_author, html=True)
                             entry = {
                                 "key": dedup_key,
                                 "dt": dt,
-                                "line": f"• <b>{company}</b> — {title} {season_str} [{repo_author}]\n{url}".strip(),
+                                "line": line,
                                 "repo": repo,
                                 "item": item  # Store item for cache updates
                             }
