@@ -213,9 +213,7 @@ def main():
                             locations = item.get("locations", [])
                             location = format_location(locations, mode="digest")
                             
-                            # Add source tag with author name to distinguish repos
-                            repo_author = repo.split('/')[0] if '/' in repo else repo
-                            line = format_job_line(company, title, season, location, url, repo_author, html=True)
+                            line = format_job_line(company, title, season, location, url, html=True)
                             entry = {
                                 "key": dedup_key,
                                 "dt": dt,

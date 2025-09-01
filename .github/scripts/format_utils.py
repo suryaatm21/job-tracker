@@ -80,7 +80,7 @@ def log_location_resolution(company, title, locations, resolved_location, mode):
     if mode == "dm" and len(locations) > 1 and resolved_location in ["California", "New York", "New Jersey"]:
         print(f"Resolved multi-location to {resolved_location} for {company} {title}")
 
-def format_job_line(company, title, season, location, url, repo_author, html=False):
+def format_job_line(company, title, season, location, url, html=False):
     """
     Format a complete job listing line with optional location.
     
@@ -90,18 +90,17 @@ def format_job_line(company, title, season, location, url, repo_author, html=Fal
         season (str): Season/term information
         location (str): Formatted location string (from format_location)
         url (str): Job application URL
-        repo_author (str): Repository author for source attribution
         html (bool): Whether to use HTML formatting (for Telegram)
         
     Returns:
         str: Formatted job line
         
     Examples:
-        format_job_line("Tesla", "SWE Intern", "Summer 2026", "California", "https://...", "vanshb03")
-        -> "• Tesla — SWE Intern [Summer 2026 | California] [vanshb03] https://..."
+        format_job_line("Tesla", "SWE Intern", "Summer 2026", "California", "https://...")
+        -> "• Tesla — SWE Intern [Summer 2026 | California] https://..."
         
-        format_job_line("Google", "DS Intern", "Summer 2026", "", "https://...", "SimplifyJobs", html=True)
-        -> "• <b>Google</b> — DS Intern [Summer 2026] [SimplifyJobs]\nhttps://..."
+        format_job_line("Google", "DS Intern", "Summer 2026", "", "https://...", html=True)
+        -> "• <b>Google</b> — DS Intern [Summer 2026]\nhttps://..."
     """
     # Build bracket content
     bracket_parts = []
@@ -116,9 +115,9 @@ def format_job_line(company, title, season, location, url, repo_author, html=Fal
     if html:
         # HTML format for Telegram channel digest
         company_formatted = f"<b>{company}</b>" if company else ""
-        line = f"• {company_formatted} — {title} {bracket_str} [{repo_author}]".strip()
+        line = f"• {company_formatted} — {title} {bracket_str}".strip()
         return f"{line}\n{url}".strip()
     else:
         # Plain text format for DM alerts
-        line = f"• {company} — {title} {bracket_str} [{repo_author}] {url}".strip()
+        line = f"• {company} — {title} {bracket_str} {url}".strip()
         return line

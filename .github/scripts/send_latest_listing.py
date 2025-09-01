@@ -84,8 +84,7 @@ def main():
     location = format_location(locations, mode="dm")
     
     # Use format_job_line for consistent formatting
-    repo_author = TARGET_REPO.split('/')[0] if '/' in TARGET_REPO else TARGET_REPO
-    formatted_line = format_job_line(company, title, season, location, url, repo_author, html=False)
+    formatted_line = format_job_line(company, title, season, location, url, html=False)
     
     # Add context prefix if provided
     prefix = f"{MESSAGE_PREFIX}: " if MESSAGE_PREFIX else ""

@@ -217,9 +217,7 @@ def process_repo_entries(repo, listings_path, last_seen_sha, seen=None, ttl_seco
                         if locations and len(locations) > 1:
                             log_location_resolution(company, title, locations, location, "dm")
                         
-                        # Add source tag with author name to distinguish repos
-                        repo_author = repo.split('/')[0] if '/' in repo else repo
-                        line = format_job_line(company, title, season, location, url, repo_author, html=False)
+                        line = format_job_line(company, title, season, location, url, html=False)
                         all_new_entries.append({
                             "key": key,
                             "line": line,
