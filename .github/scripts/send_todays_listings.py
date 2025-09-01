@@ -28,6 +28,8 @@ else:
     # Fallback to single repo for backward compatibility
     TARGET_REPOS = [os.environ["TARGET_REPO"]]
 
+MESSAGE_PREFIX = os.getenv("MESSAGE_PREFIX", "")  # Context prefix for messages
+
 LISTINGS_PATH = os.getenv("LISTINGS_PATH", "listings.json")
 DATE_FIELD = os.getenv("DATE_FIELD", "date_posted")
 DATE_FALLBACK = os.getenv("DATE_FALLBACK", "date_updated")
@@ -201,7 +203,9 @@ def main() -> int:
         repo_tag = f"[{repo_author}]" if repo_author else ""
         lines.append(f"• <b>{company}</b> — {title} {season_str} {repo_tag}\n{url}".strip())
 
-    header = f"New listings today: {len(all_todays)}"
+    # Add context prefix if provided
+    prefix = f"{MESSAGE_PREFIX}: " if MESSAGE_PREFIX else ""
+    header = f"{prefix}New listings today: {len(all_todays)}"
     send_telegram("\n\n".join([header, *lines]))
     return 0
 

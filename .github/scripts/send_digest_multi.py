@@ -34,6 +34,11 @@ COUNT = int(os.environ.get("COUNT", "50") or "50")  # Handle empty string case
 # TTL configuration for seen cache
 SEEN_TTL_DAYS = int(os.environ.get("SEEN_TTL_DAYS", "14"))
 
+# State directory (configurable for cache separation)
+import pathlib
+STATE_DIR = pathlib.Path(os.environ.get("STATE_DIR", ".state"))
+STATE_DIR.mkdir(exist_ok=True, parents=True)
+
 def get_default_branch(repo):
     """Get default branch for a repository"""
     repo_info = gh_get(f"{GH}/repos/{repo}")
@@ -162,8 +167,9 @@ def main():
     print(f"Time window: {WINDOW_HOURS} hours, Max items: {COUNT}")
     print(f"SEEN_TTL_DAYS={SEEN_TTL_DAYS}")
     
-    # Load seen cache and calculate TTL
-    seen = load_seen()
+    # Load seen cache and calculate TTL (use STATE_DIR)
+    seen_cache_path = STATE_DIR / "seen.json"
+    seen = load_seen(str(seen_cache_path))
     ttl_seconds = SEEN_TTL_DAYS * 24 * 3600
     now_epoch = int(time.time())
     
@@ -223,7 +229,7 @@ def main():
     if not all_entries:
         print("No entries found in time window after TTL filtering, exiting silently")
         # Still save seen cache to prune old entries
-        save_seen(seen, SEEN_TTL_DAYS)
+        save_seen(seen, SEEN_TTL_DAYS, str(seen_cache_path))
         return
     
     # Deduplicate by key (keep newest by timestamp)
@@ -243,7 +249,7 @@ def main():
     if not deduped_entries:
         print("No entries after deduplication, exiting silently")
         # Still save seen cache to prune old entries
-        save_seen(seen, SEEN_TTL_DAYS)
+        save_seen(seen, SEEN_TTL_DAYS, str(seen_cache_path))
         return
     
     # Sort final entries by company name alphabetically, then by timestamp desc, and limit to COUNT
@@ -257,7 +263,7 @@ def main():
             seen[cache_key] = now_epoch
     
     # Build message
-    header = f"New internships detected in last {WINDOW_HOURS}h ({len(final_entries)})"
+    header = f"📰 Channel Digest: New internships in last {WINDOW_HOURS}h ({len(final_entries)})"
     body = "\n\n".join(entry["line"] for entry in final_entries)
     message = f"{header}\n\n{body}"
     
@@ -271,7 +277,7 @@ def main():
         print("Failed to send digest")
     
     # Save updated seen cache regardless of send success
-    save_seen(seen, SEEN_TTL_DAYS)
+    save_seen(seen, SEEN_TTL_DAYS, str(seen_cache_path))
     print(f"Updated seen cache with {len(final_entries)} entries")
 
 if __name__ == "__main__":
