@@ -22,7 +22,9 @@ WINDOW_HOURS = float(os.getenv("WINDOW_HOURS", "24"))  # Only alert for items in
 # TTL configuration for seen cache
 SEEN_TTL_DAYS = int(os.getenv("SEEN_TTL_DAYS", "14"))
 
-STATE_DIR = pathlib.Path(".state"); STATE_DIR.mkdir(exist_ok=True, parents=True)
+# State directory (configurable for cache separation)
+STATE_DIR = pathlib.Path(os.getenv("STATE_DIR", ".state"))
+STATE_DIR.mkdir(exist_ok=True, parents=True)
 
 def get_default_branch(repo):
     """Get default branch for a repository"""
@@ -229,8 +231,9 @@ def main():
     debug_log(f"Listings file path hint: {LISTINGS_PATH}")
     debug_log(f"SEEN_TTL_DAYS={SEEN_TTL_DAYS}")
     
-    # Load seen cache and calculate TTL
-    seen = load_seen()
+    # Load seen cache and calculate TTL (use STATE_DIR)
+    seen_cache_path = STATE_DIR / "seen.json"
+    seen = load_seen(str(seen_cache_path))
     ttl_seconds = SEEN_TTL_DAYS * 24 * 3600
     now_epoch = int(time.time())
     
@@ -259,7 +262,7 @@ def main():
                 debug_log(f"Failed to pre-populate cache from {repo}: {e}")
         
         if seen:
-            save_seen(seen, SEEN_TTL_DAYS)
+            save_seen(seen, SEEN_TTL_DAYS, str(seen_cache_path))
             debug_log(f"Saved pre-populated cache with {len(seen)} items")
     
     all_entries = []
@@ -349,7 +352,7 @@ def main():
         final_entries.sort(key=lambda x: (x["line"].split(" — ")[0].replace("• ", "").lower(), -x["ts"]))
         lines = [entry["line"] for entry in final_entries[:10]]
         
-        header = f"New internships detected ({len(final_entries)})"
+        header = f"🔔 DM Alert: New internships detected ({len(final_entries)})"
         message = "\n".join([header] + lines)
         
         debug_log(f"Sending message with {len(lines)} lines")
@@ -358,7 +361,7 @@ def main():
         debug_log("No messages to send after TTL filtering")
     
     # Save updated seen cache
-    save_seen(seen, SEEN_TTL_DAYS)
+    save_seen(seen, SEEN_TTL_DAYS, str(seen_cache_path))
 
 if __name__ == "__main__":
     main()

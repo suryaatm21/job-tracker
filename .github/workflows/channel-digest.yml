@@ -30,6 +30,7 @@ env:
   DATE_FALLBACK: 'date_updated'
   WINDOW_HOURS: '4'  # 4 hours for regular digest
   SEEN_TTL_DAYS: '14'  # Channel digest: longer TTL for less frequent updates
+  STATE_DIR: '.state/channel-digest'  # Separate state directory for channel digest
 
 jobs:
   digest:
@@ -45,8 +46,8 @@ jobs:
         id: cache-restore
         uses: actions/cache/restore@v4
         with:
-          path: .state
-          key: channel-digest-ttl-v1
+          path: .state/channel-digest
+          key: channel-digest-state-v1
 
       - name: Run 4h digest to channel
         if: github.event_name == 'schedule' || github.event.inputs.command == 'digest'
@@ -61,6 +62,7 @@ jobs:
           WINDOW_HOURS: ${{ env.WINDOW_HOURS }}
           SEEN_TTL_DAYS: ${{ env.SEEN_TTL_DAYS }}
           COUNT: ${{ github.event.inputs.count }}
+          STATE_DIR: ${{ env.STATE_DIR }}
         run: python .github/scripts/send_digest_multi.py
 
       - name: Send latest listing to channel (manual runs only)
@@ -71,6 +73,7 @@ jobs:
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID_CHANNEL }}
           TARGET_REPO: 'vanshb03/Summer2026-Internships'
           LISTINGS_PATH: ${{ env.LISTINGS_PATH }}
+          MESSAGE_PREFIX: '📰 Channel'
         run: python .github/scripts/send_latest_listing.py
 
       - name: Send today's listings to channel (manual runs only)
@@ -81,6 +84,7 @@ jobs:
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID_CHANNEL }}
           TARGET_REPO: 'vanshb03/Summer2026-Internships'
           LISTINGS_PATH: ${{ env.LISTINGS_PATH }}
+          MESSAGE_PREFIX: '📰 Channel'
         run: python .github/scripts/send_todays_listings.py
 
       - name: Send recent listings to channel (manual runs only)
@@ -92,6 +96,7 @@ jobs:
           TARGET_REPO: 'vanshb03/Summer2026-Internships'
           LISTINGS_PATH: ${{ env.LISTINGS_PATH }}
           COUNT: ${{ github.event.inputs.count }}
+          MESSAGE_PREFIX: '📰 Channel'
         run: python .github/scripts/send_recent_listings.py
 
       # Save channel digest TTL state (separate from DM watcher)
@@ -99,5 +104,5 @@ jobs:
         if: always()
         uses: actions/cache/save@v4
         with:
-          path: .state
-          key: channel-digest-ttl-v1
+          path: .state/channel-digest
+          key: channel-digest-state-v1

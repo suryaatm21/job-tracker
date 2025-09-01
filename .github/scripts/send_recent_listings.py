@@ -27,6 +27,7 @@ LISTINGS_PATH = os.getenv("LISTINGS_PATH", "listings.json")
 DATE_FIELD = os.getenv("DATE_FIELD", "date_posted")
 DATE_FALLBACK = os.getenv("DATE_FALLBACK", "date_updated")
 COUNT = max(1, int(os.getenv("COUNT", "10") or 10))
+MESSAGE_PREFIX = os.getenv("MESSAGE_PREFIX", "")  # Context prefix for messages
 
 def detect_listings_path(repo, branch="main"):
     """Auto-detect listings.json path within repo"""
@@ -187,7 +188,9 @@ def main() -> int:
         repo_tag = f"[{repo_author}]" if repo_author else ""
         lines.append(f"• <b>{company}</b> — {title} {season_str} {repo_tag} ({when})\n{url}".strip())
 
-    header = f"Most recent listings: {len(top)}"
+    # Add context prefix if provided
+    prefix = f"{MESSAGE_PREFIX}: " if MESSAGE_PREFIX else ""
+    header = f"{prefix}Most recent listings: {len(top)}"
     send_telegram("\n\n".join([header, *lines]))
     return 0
 

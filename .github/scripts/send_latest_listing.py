@@ -10,6 +10,7 @@ TARGET_REPO = os.environ["TARGET_REPO"]
 LISTINGS_PATH = os.getenv("LISTINGS_PATH", "listings.json")
 DATE_FIELD = os.getenv("DATE_FIELD", "date_posted")
 DATE_FALLBACK = os.getenv("DATE_FALLBACK", "date_updated")
+MESSAGE_PREFIX = os.getenv("MESSAGE_PREFIX", "")  # Context prefix for messages
 HEADERS = {"Authorization": f"Bearer {os.getenv('GH_TOKEN','')}",
            "Accept": "application/vnd.github+json"}
 
@@ -76,7 +77,10 @@ def main():
     company = latest.get("company_name", latest.get("company", ""))
     url = latest.get("url", latest.get("application_link", ""))
     season = latest.get("season", "")
-    text = f"Latest listing: {company} — {title} [{season}]\n{url}"
+    
+    # Add context prefix if provided
+    prefix = f"{MESSAGE_PREFIX}: " if MESSAGE_PREFIX else ""
+    text = f"{prefix}Latest listing: {company} — {title} [{season}]\n{url}"
     send_telegram(text)
     return 0
 

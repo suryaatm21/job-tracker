@@ -28,6 +28,7 @@ env:
   DATE_FALLBACK: 'date_updated'
   WINDOW_HOURS: '24'
   SEEN_TTL_DAYS: '7'  # DM alerts: shorter TTL for frequent updates
+  STATE_DIR: '.state/dm-watcher'  # Separate state directory for DM watcher
 
 jobs:
   watch:
@@ -38,13 +39,13 @@ jobs:
         with: { python-version: '3.11' }
       - run: pip install requests
 
-      # Use cache for .state so we don't commit it
+      # Use separate cache for DM watcher state (commit SHAs + TTL cache)
       - name: Restore watcher state
         id: cache-restore
         uses: actions/cache/restore@v4
         with:
-          path: .state
-          key: last-seen-multi-v1
+          path: .state/dm-watcher
+          key: dm-watcher-state-v1
 
       - name: Validate Telegram env
         env:
@@ -62,6 +63,7 @@ jobs:
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
           TARGET_REPO: 'vanshb03/Summer2026-Internships'
           LISTINGS_PATH: ${{ env.LISTINGS_PATH }}
+          MESSAGE_PREFIX: '🔔 DM Alert'
         run: python .github/scripts/send_latest_listing.py
 
       - name: run today
@@ -72,6 +74,7 @@ jobs:
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
           TARGET_REPO: 'vanshb03/Summer2026-Internships'
           LISTINGS_PATH: ${{ env.LISTINGS_PATH }}
+          MESSAGE_PREFIX: '🔔 DM Alert'
         run: python .github/scripts/send_todays_listings.py
 
       - name: run recent
@@ -83,6 +86,7 @@ jobs:
           TARGET_REPO: 'vanshb03/Summer2026-Internships'
           LISTINGS_PATH: ${{ env.LISTINGS_PATH }}
           COUNT: ${{ github.event.inputs.count }}
+          MESSAGE_PREFIX: '🔔 DM Alert'
         run: python .github/scripts/send_recent_listings.py
 
       # Scheduled watcher → DM (only when true additions within WINDOW_HOURS)
@@ -98,10 +102,11 @@ jobs:
           DATE_FALLBACK: ${{ env.DATE_FALLBACK }}
           WINDOW_HOURS: ${{ env.WINDOW_HOURS }}
           SEEN_TTL_DAYS: ${{ env.SEEN_TTL_DAYS }}
+          STATE_DIR: ${{ env.STATE_DIR }}
         run: python .github/scripts/watch_repo.py
 
       - name: Save watcher state
         uses: actions/cache/save@v4
         with:
-          path: .state
-          key: last-seen-multi-v1
+          path: .state/dm-watcher
+          key: dm-watcher-state-v1
