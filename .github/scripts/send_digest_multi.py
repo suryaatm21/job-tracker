@@ -29,7 +29,7 @@ LISTINGS_PATH = os.environ.get("LISTINGS_PATH", ".github/scripts/listings.json")
 DATE_FIELD = os.environ.get("DATE_FIELD", "date_posted")
 DATE_FALLBACK = os.environ.get("DATE_FALLBACK", "date_updated")
 WINDOW_HOURS = int(os.environ.get("WINDOW_HOURS", "4"))  # Default 4 hours for channel digest
-COUNT = int(os.environ.get("COUNT", "50"))
+COUNT = int(os.environ.get("COUNT", "50") or "50")  # Handle empty string case
 
 # TTL configuration for seen cache
 SEEN_TTL_DAYS = int(os.environ.get("SEEN_TTL_DAYS", "14"))
