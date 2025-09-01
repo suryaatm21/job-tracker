@@ -189,11 +189,8 @@ def main() -> int:
         ts = sort_key(x)
         when = datetime.utcfromtimestamp(ts).strftime("%Y-%m-%d") if ts > 0 else ""
         
-        # Add source tag with author name to distinguish repos
-        repo_author = x.get("_source_repo", "").split('/')[0] if x.get("_source_repo") else ""
-        
         # Format the line using the helper, then add date info
-        line = format_job_line(company, title, season, location, url, repo_author, html=True)
+        line = format_job_line(company, title, season, location, url, html=True)
         if when:
             # Insert the date before the URL
             line_parts = line.split('\n')

@@ -203,9 +203,7 @@ def main() -> int:
         locations = x.get("locations", [])
         location = format_location(locations, mode="dm")
         
-        # Add source tag with author name to distinguish repos
-        repo_author = x.get("_source_repo", "").split('/')[0] if x.get("_source_repo") else ""
-        line = format_job_line(company, title, season, location, url, repo_author, html=True)
+        line = format_job_line(company, title, season, location, url, html=True)
         lines.append(line)
 
     # Add context prefix if provided
