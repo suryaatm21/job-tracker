@@ -28,6 +28,11 @@ on:
 permissions:
   contents: read
 
+# Prevent overlapping runs that could cause cache conflicts
+concurrency:
+  group: channel-digest-${{ github.ref }}
+  cancel-in-progress: false
+
 env:
   TARGET_REPOS: '["SimplifyJobs/Summer2026-Internships","vanshb03/Summer2026-Internships"]'
   LISTINGS_PATH: ".github/scripts/listings.json"
@@ -52,7 +57,9 @@ jobs:
         uses: actions/cache/restore@v4
         with:
           path: .state/channel-digest
-          key: channel-digest-state-v1
+          key: channel-digest-state-v1-${{ github.run_id }}
+          restore-keys: |
+            channel-digest-state-v1-
 
       - name: Run 4h digest to channel
         if: github.event_name == 'schedule' || github.event.inputs.command == 'digest'
@@ -111,4 +118,4 @@ jobs:
         uses: actions/cache/save@v4
         with:
           path: .state/channel-digest
-          key: channel-digest-state-v1
+          key: channel-digest-state-v1-${{ github.run_id }}
