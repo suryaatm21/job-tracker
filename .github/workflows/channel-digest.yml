@@ -2,13 +2,13 @@ name: Channel digest (4h)
 
 on:
   schedule:
-    - cron: '0 */4 * * *'
+    - cron: "0 */4 * * *"
   workflow_dispatch:
     inputs:
       command:
-        description: 'Which manual command to run'
+        description: "Which manual command to run"
         required: false
-        default: 'digest'
+        default: "digest"
         type: choice
         options:
           - digest
@@ -16,21 +16,26 @@ on:
           - today
           - recent
       count:
-        description: 'Max items to include (digest) or N for recent'
+        description: "Max items to include (digest) or N for recent"
         required: false
-        default: '50'
+        default: "50"
+      force_window_hours:
+        description: "Override WINDOW_HOURS for testing (e.g., 720 for 30 days)"
+        required: false
+        default: "720"
+        type: string
 
 permissions:
   contents: read
 
 env:
   TARGET_REPOS: '["SimplifyJobs/Summer2026-Internships","vanshb03/Summer2026-Internships"]'
-  LISTINGS_PATH: '.github/scripts/listings.json'
-  DATE_FIELD: 'date_posted'
-  DATE_FALLBACK: 'date_updated'
-  WINDOW_HOURS: '4'  # 4 hours for regular digest
-  SEEN_TTL_DAYS: '14'  # Channel digest: longer TTL for less frequent updates
-  STATE_DIR: '.state/channel-digest'  # Separate state directory for channel digest
+  LISTINGS_PATH: ".github/scripts/listings.json"
+  DATE_FIELD: "date_posted"
+  DATE_FALLBACK: "date_updated"
+  WINDOW_HOURS: "4" # 4 hours for regular digest
+  SEEN_TTL_DAYS: "14" # Channel digest: longer TTL for less frequent updates
+  STATE_DIR: ".state/channel-digest" # Separate state directory for channel digest
 
 jobs:
   digest:
@@ -38,7 +43,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
-        with: { python-version: '3.11' }
+        with: { python-version: "3.11" }
       - run: pip install requests
 
       # Use separate cache for channel digest TTL state
@@ -63,6 +68,7 @@ jobs:
           SEEN_TTL_DAYS: ${{ env.SEEN_TTL_DAYS }}
           COUNT: ${{ github.event.inputs.count }}
           STATE_DIR: ${{ env.STATE_DIR }}
+          FORCE_WINDOW_HOURS: ${{ github.event.inputs.force_window_hours }}
         run: python .github/scripts/send_digest_multi.py
 
       - name: Send latest listing to channel (manual runs only)
@@ -71,9 +77,9 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID_CHANNEL }}
-          TARGET_REPO: 'vanshb03/Summer2026-Internships'
+          TARGET_REPO: "vanshb03/Summer2026-Internships"
           LISTINGS_PATH: ${{ env.LISTINGS_PATH }}
-          MESSAGE_PREFIX: '📰 Channel'
+          MESSAGE_PREFIX: "📰 Channel"
         run: python .github/scripts/send_latest_listing.py
 
       - name: Send today's listings to channel (manual runs only)
@@ -82,9 +88,9 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID_CHANNEL }}
-          TARGET_REPO: 'vanshb03/Summer2026-Internships'
+          TARGET_REPO: "vanshb03/Summer2026-Internships"
           LISTINGS_PATH: ${{ env.LISTINGS_PATH }}
-          MESSAGE_PREFIX: '📰 Channel'
+          MESSAGE_PREFIX: "📰 Channel"
         run: python .github/scripts/send_todays_listings.py
 
       - name: Send recent listings to channel (manual runs only)
@@ -93,10 +99,10 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID_CHANNEL }}
-          TARGET_REPO: 'vanshb03/Summer2026-Internships'
+          TARGET_REPO: "vanshb03/Summer2026-Internships"
           LISTINGS_PATH: ${{ env.LISTINGS_PATH }}
           COUNT: ${{ github.event.inputs.count }}
-          MESSAGE_PREFIX: '📰 Channel'
+          MESSAGE_PREFIX: "📰 Channel"
         run: python .github/scripts/send_recent_listings.py
 
       # Save channel digest TTL state (separate from DM watcher)

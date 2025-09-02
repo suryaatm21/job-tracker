@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 Multi-repo digest: Fetch listings from multiple repositories, deduplicate, 
-filter by time window, and send consolidated digest to Telegram.
+filter by time window, and send consolidated digest to Telegram with batching.
 
 Environment variables:
 - TARGET_REPOS: JSON array of repo names (e.g., '["owner1/repo1", "owner2/repo2"]')
@@ -23,6 +23,7 @@ from state_utils import (
     get_cache_key, format_epoch_for_log
 )
 from format_utils import format_location, log_location_resolution, format_job_line
+from telegram_utils import batch_send_message
 
 # Configuration
 TARGET_REPOS = json.loads(os.environ.get("TARGET_REPOS", '["vanshb03/Summer2026-Internships"]'))
@@ -31,6 +32,12 @@ DATE_FIELD = os.environ.get("DATE_FIELD", "date_posted")
 DATE_FALLBACK = os.environ.get("DATE_FALLBACK", "date_updated")
 WINDOW_HOURS = int(os.environ.get("WINDOW_HOURS", "4"))  # Default 4 hours for channel digest
 COUNT = int(os.environ.get("COUNT", "50") or "50")  # Handle empty string case
+
+# Support for FORCE_WINDOW_HOURS override for testing
+FORCE_WINDOW_HOURS = os.environ.get("FORCE_WINDOW_HOURS")
+if FORCE_WINDOW_HOURS and FORCE_WINDOW_HOURS.replace('.', '').isdigit():
+    WINDOW_HOURS = int(float(FORCE_WINDOW_HOURS))
+    debug_log(f"[CONFIG] FORCE_WINDOW_HOURS override: {WINDOW_HOURS} hours")
 
 # TTL configuration for seen cache
 SEEN_TTL_DAYS = int(os.environ.get("SEEN_TTL_DAYS", "14"))
@@ -43,7 +50,9 @@ STATE_DIR.mkdir(exist_ok=True, parents=True)
 def get_default_branch(repo):
     """Get default branch for a repository"""
     repo_info = gh_get(f"{GH}/repos/{repo}")
-    return repo_info["default_branch"]
+    branch = repo_info["default_branch"]
+    debug_log(f"[BRANCH] {repo} default branch: {branch}")
+    return branch
 
 def detect_listings_path(repo, branch):
     """Try to find listings file in repo, trying LISTINGS_PATH first, then fallbacks"""
@@ -52,22 +61,24 @@ def detect_listings_path(repo, branch):
     for path in paths_to_try:
         try:
             gh_get(f"{GH}/repos/{repo}/contents/{path}", ref=branch)
-            print(f"Found listings file at {path} in {repo}")
+            debug_log(f"[PATH] {repo} found listings at: {path}")
             return path
         except requests.HTTPError as e:
             if e.response.status_code == 404:
                 continue
             raise
     
-    print(f"Warning: Could not find listings file in {repo}, using {LISTINGS_PATH}")
+    debug_log(f"[PATH] {repo} using fallback path: {LISTINGS_PATH}")
     return LISTINGS_PATH  # fallback to configured path
 
 def get_listings(repo, path, ref=None):
     """Fetch and parse listings JSON from a repository using robust helper"""
     try:
-        return fetch_file_json(repo, path, ref)
+        listings = fetch_file_json(repo, path, ref)
+        debug_log(f"[FILE] {repo}:{path}@{ref or 'HEAD'} → {len(listings)} listings")
+        return listings
     except Exception as e:
-        print(f"Error fetching listings from {repo}:{path} - {e}")
+        debug_log(f"[FILE] {repo}:{path}@{ref or 'HEAD'} → error: {e}")
         return []
 
 def normalize_url(url):
@@ -114,6 +125,7 @@ def should_include_listing(item):
     """Filter out listings with missing/invalid URLs for better quality"""
     url = item.get("url", "").strip()
     return bool(url)  # Skip entries with falsy URLs
+
 def parse_dt(s):
     """Parse date value - supports epoch timestamps and ISO strings"""
     if not s:
@@ -135,38 +147,52 @@ def parse_dt(s):
     except Exception:
         return None
 
-def send_telegram(text):
-    """Send message to Telegram"""
+def send_telegram_batched(header, lines):
+    """Send message to Telegram with batching support"""
     tok = os.getenv("TELEGRAM_BOT_TOKEN")
     chat = os.getenv("TELEGRAM_CHAT_ID")
     if not tok or not chat:
-        print("Missing TELEGRAM_BOT_TOKEN or TELEGRAM_CHAT_ID")
+        debug_log("[TELEGRAM] Missing TELEGRAM_BOT_TOKEN or TELEGRAM_CHAT_ID")
         return False
     
-    try:
-        response = requests.post(
-            f"https://api.telegram.org/bot{tok}/sendMessage",
-            json={
-                "chat_id": chat,
-                "text": text,
-                "disable_web_page_preview": True,
-                "parse_mode": "HTML"
-            },
-            timeout=30
-        )
-        print(f"Telegram status: {response.status_code}")
-        if not response.ok:
-            print(f"Telegram error: {response.text}")
-        return response.ok
-    except Exception as e:
-        print(f"Telegram send failed: {e}")
-        return False
+    # If small enough for single message, send as one
+    full_message = f"{header}\n\n" + "\n\n".join(lines)
+    if len(full_message) <= 4000:
+        debug_log(f"[TELEGRAM] Sending single message: {len(full_message)} chars")
+        try:
+            response = requests.post(
+                f"https://api.telegram.org/bot{tok}/sendMessage",
+                json={
+                    "chat_id": chat,
+                    "text": full_message,
+                    "disable_web_page_preview": True,
+                    "parse_mode": "HTML"
+                },
+                timeout=30
+            )
+            debug_log(f"[TELEGRAM] Single message status: {response.status_code}")
+            if not response.ok:
+                debug_log(f"[TELEGRAM] Single message error: {response.text}")
+            return response.ok
+        except Exception as e:
+            debug_log(f"[TELEGRAM] Single message failed: {e}")
+            return False
+    
+    # Use batching for long messages
+    debug_log(f"[TELEGRAM] Message too long ({len(full_message)} chars), using batching")
+    success, results = batch_send_message(tok, chat, header, lines, parse_mode="HTML")
+    
+    if not success:
+        failed_batches = [(i, status, body) for i, status, body in results if status < 200 or status >= 300]
+        debug_log(f"[TELEGRAM] Some batches failed: {failed_batches}")
+    
+    return success
 
 def main():
     """Main function to generate and send multi-repo digest"""
-    print(f"Generating digest for repos: {TARGET_REPOS}")
-    print(f"Time window: {WINDOW_HOURS} hours, Max items: {COUNT}")
-    print(f"SEEN_TTL_DAYS={SEEN_TTL_DAYS}")
+    debug_log(f"[CONFIG] Generating digest for repos: {TARGET_REPOS}")
+    debug_log(f"[CONFIG] Time window: {WINDOW_HOURS} hours, Max items: {COUNT}")
+    debug_log(f"[CONFIG] SEEN_TTL_DAYS={SEEN_TTL_DAYS}")
     
     # Load seen cache and calculate TTL (use STATE_DIR)
     seen_cache_path = STATE_DIR / "seen.json"
@@ -182,7 +208,7 @@ def main():
     # Collect entries from all repositories
     for repo in TARGET_REPOS:
         try:
-            print(f"Processing repo: {repo}")
+            debug_log(f"[REPO] Processing: {repo}")
             
             # Detect default branch and listings path
             default_branch = get_default_branch(repo)
@@ -190,7 +216,7 @@ def main():
             
             # Fetch listings
             listings = get_listings(repo, listings_path)
-            print(f"Found {len(listings)} listings in {repo}")
+            debug_log(f"[REPO] {repo} → {len(listings)} listings")
             
             # Filter and prepare entries
             for item in listings:
@@ -224,13 +250,13 @@ def main():
                             all_entries.append(entry)
             
         except Exception as e:
-            print(f"Error processing repo {repo}: {e}")
+            debug_log(f"[ERROR] {repo} processing failed: {e}")
             continue
     
-    print(f"Found {len(all_entries)} entries before deduplication and TTL filtering")
+    debug_log(f"[RESULT] Found {len(all_entries)} entries before deduplication and TTL filtering")
     
     if not all_entries:
-        print("No entries found in time window after TTL filtering, exiting silently")
+        debug_log(f"[RESULT] No entries found in time window after TTL filtering, exiting silently")
         # Still save seen cache to prune old entries
         save_seen(seen, SEEN_TTL_DAYS, str(seen_cache_path))
         return
@@ -247,10 +273,10 @@ def main():
             seen_keys.add(entry["key"])
             deduped_entries.append(entry)
     
-    print(f"After deduplication: {len(deduped_entries)} unique entries")
+    debug_log(f"[RESULT] After deduplication: {len(deduped_entries)} unique entries")
     
     if not deduped_entries:
-        print("No entries after deduplication, exiting silently")
+        debug_log(f"[RESULT] No entries after deduplication, exiting silently")
         # Still save seen cache to prune old entries
         save_seen(seen, SEEN_TTL_DAYS, str(seen_cache_path))
         return
@@ -265,23 +291,22 @@ def main():
             cache_key = get_cache_key(entry["item"])
             seen[cache_key] = now_epoch
     
-    # Build message
+    # Build message components
     header = f"📰 Channel Digest: New internships in last {WINDOW_HOURS}h ({len(final_entries)})"
-    body = "\n\n".join(entry["line"] for entry in final_entries)
-    message = f"{header}\n\n{body}"
+    lines = [entry["line"] for entry in final_entries]
     
-    # Send to Telegram
-    print(f"Sending digest with {len(final_entries)} entries")
-    success = send_telegram(message)
+    # Send to Telegram with batching
+    debug_log(f"[SEND] Sending digest with {len(final_entries)} entries, {sum(len(line) for line in lines)} total chars")
+    success = send_telegram_batched(header, lines)
     
     if success:
-        print("Digest sent successfully")
+        debug_log(f"[SEND] Digest sent successfully")
     else:
-        print("Failed to send digest")
+        debug_log(f"[SEND] Failed to send digest")
     
     # Save updated seen cache regardless of send success
     save_seen(seen, SEEN_TTL_DAYS, str(seen_cache_path))
-    print(f"Updated seen cache with {len(final_entries)} entries")
+    debug_log(f"[STATE] Updated seen cache with {len(final_entries)} entries")
 
 if __name__ == "__main__":
     main()
