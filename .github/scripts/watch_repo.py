@@ -27,6 +27,21 @@ if FORCE_WINDOW_HOURS and FORCE_WINDOW_HOURS.replace('.', '').isdigit():
     WINDOW_HOURS = float(FORCE_WINDOW_HOURS)
     debug_log(f"[CONFIG] FORCE_WINDOW_HOURS override: {WINDOW_HOURS} hours")
 
+# Diagnostic inputs for manual runs
+RESET_LAST_SEEN = os.getenv("RESET_LAST_SEEN", "false").lower() == "true"
+BACK_ONE = os.getenv("BACK_ONE", "false").lower() == "true"
+
+# Category filtering: Only allow these categories from SimplifyJobs repo
+ALLOWED_CATEGORIES = {
+    "Software Engineering", 
+    "Data Science, AI & Machine Learning"
+}
+
+if RESET_LAST_SEEN:
+    debug_log(f"[CONFIG] RESET_LAST_SEEN=true - will ignore cached last_seen SHAs")
+if BACK_ONE:
+    debug_log(f"[CONFIG] BACK_ONE=true - will set last_seen to parent of latest commit")
+
 # TTL configuration for seen cache
 SEEN_TTL_DAYS = int(os.getenv("SEEN_TTL_DAYS", "14"))
 
@@ -77,6 +92,57 @@ def get_file_at(repo, ref, path):
 
 def watched(path):
     return any(path == p or path.startswith(p) for p in WATCH_PATHS)
+
+def classify_job_category(job):
+    """
+    Classify job category based on title and existing category field.
+    Returns category string or None if job should be filtered out.
+    """
+    # First check if there's an existing category field (SimplifyJobs has this)
+    if "category" in job and job["category"]:
+        category = job["category"].strip()
+        if category in ALLOWED_CATEGORIES:
+            return category
+        # If existing category is not in allowed list, filter out
+        return None
+    
+    # Fallback: classify by title if no category exists
+    title = job.get("title", "").lower()
+    
+    # Data Science & AI & Machine Learning (first priority for overlapping terms)
+    if any(term in title for term in ["data science", "artificial intelligence", "data scientist", "ai &", "machine learning", "ml", "data analytics", "data analyst", "research eng", "nlp", "computer vision", "research sci", "data eng"]):
+        return "Data Science, AI & Machine Learning"
+    
+    # Software Engineering (second priority)
+    elif any(term in title for term in ["software", "software eng", "software dev", "product engineer", "fullstack", "full-stack", "full stack", "frontend", "front end", "front-end", "backend", "back end", "back-end", "founding engineer", "mobile dev", "mobile engineer", "forward deployed", "forward-deployed"]):
+        return "Software Engineering"
+    
+    # Filter out other categories (Hardware, Quant, Product, Other, etc.)
+    else:
+        return None
+
+def should_process_repo_item(item, repo):
+    """
+    Filter items based on:
+    1. Basic quality checks (visible, has URL)
+    2. Repo-specific filtering (only SimplifyJobs for category filtering)  
+    3. Category filtering for SimplifyJobs
+    """
+    # Basic quality checks
+    if not should_include_item(item):
+        return False, "quality"
+    
+    # Only apply category filtering to SimplifyJobs repo
+    if repo == "SimplifyJobs/Summer2026-Internships":
+        category = classify_job_category(item)
+        if category is None:
+            return False, "category"
+        # Store the category for later use
+        item["_classified_category"] = category
+        return True, "allowed"
+    
+    # Other repos: only basic quality checks
+    return True, "allowed"
 
 def send_telegram(text):
     debug_log(f"[TELEGRAM] Sending message: {len(text)} chars, preview: {text[:100]}...")
@@ -152,18 +218,22 @@ def process_repo_entries(repo, listings_path, last_seen_sha, seen=None, ttl_seco
         debug_log(f"[WATCH] {repo} → No commits found")
         return []
     
-    debug_log(f"[WATCH] {repo} → considered_commits={len(commits)}, newest={commits[0]['sha'][:8]}")
-    
+    newest_sha = commits[0]['sha'][:8]
+    debug_log(f"[COMMITS] {repo} newest={newest_sha}, considered_commits={len(commits)}")
+
     # Collect unseen commits (newest→oldest until last_seen)
     new = []
     for c in commits:
         if c["sha"] == last_seen_sha:
-            debug_log(f"[WATCH] {repo} → found last seen commit: {c['sha'][:8]}")
+            debug_log(f"[COMMITS] {repo} found last seen commit: {c['sha'][:8]}")
             break
         new.append(c)
-    
+
     if not new:
-        debug_log(f"[WATCH] {repo} → No new commits since last run")
+        if last_seen_sha and commits and commits[0]["sha"] == last_seen_sha:
+            debug_log(f"[INFO] {repo} last_seen is already newest; likely no pushes since previous run")
+        else:
+            debug_log(f"[COMMITS] {repo} no new commits since last run")
         return []
     
     debug_log(f"[WATCH] {repo} → Processing {len(new)} new commits")
@@ -200,55 +270,59 @@ def process_repo_entries(repo, listings_path, last_seen_sha, seen=None, ttl_seco
         before_keys = {get_dedup_key(x) for x in before if get_dedup_key(x) and should_include_item(x)}
         commit_new_count = 0
         commit_window_count = 0
+        commit_category_count = 0
         
         for item in after:
-            # Skip items with falsy URLs or marked as not visible
-            if not should_include_item(item):
-                continue
-                
             key = get_dedup_key(item)
             if key and key not in before_keys:
                 commit_new_count += 1
+                
+                # Apply time window filter first
                 ts_val = item.get(DATE_FIELD, item.get(DATE_FALLBACK))
                 ts = to_epoch(ts_val)
-                
-                # Apply time window filter
                 cutoff = time.time() - (WINDOW_HOURS * 3600.0)
+                
                 if ts >= cutoff:
                     commit_window_count += 1
-                    # Check TTL cache to see if we should alert for this item (if TTL enabled)
-                    should_alert = True
-                    if seen is not None and ttl_seconds is not None and now_epoch is not None:
-                        should_alert = should_alert_item(item, seen, ttl_seconds, now_epoch)
                     
-                    if should_alert:
-                        title = item.get("title", "")
-                        company = item.get("company_name", "")
-                        url = item.get("url", "")
-                        season = get_unified_season(item)  # Use unified season handling
+                    # Apply repo-specific filtering (category filtering for SimplifyJobs)
+                    should_process, filter_reason = should_process_repo_item(item, repo)
+                    if should_process:
+                        commit_category_count += 1
                         
-                        # Format location with DM mode (CA/NY/NJ resolution)
-                        locations = item.get("locations", [])
-                        location = format_location(locations, mode="dm")
+                        # Check TTL cache to see if we should alert for this item (if TTL enabled)
+                        should_alert = True
+                        if seen is not None and ttl_seconds is not None and now_epoch is not None:
+                            should_alert = should_alert_item(item, seen, ttl_seconds, now_epoch)
                         
-                        # Log location resolution for debugging
-                        if locations and len(locations) > 1:
-                            log_location_resolution(company, title, locations, location, "dm")
-                        
-                        line = format_job_line(company, title, season, location, url, html=False)
-                        all_new_entries.append({
-                            "key": key,
-                            "line": line,
-                            "ts": ts,
-                            "repo": repo
-                        })
-                        
-                        # Update seen cache with current timestamp (if TTL enabled)
-                        if seen is not None and now_epoch is not None:
-                            cache_key = get_cache_key(item)
-                            seen[cache_key] = now_epoch
+                        if should_alert:
+                            title = item.get("title", "")
+                            company = item.get("company_name", "")
+                            url = item.get("url", "")
+                            season = get_unified_season(item)  # Use unified season handling
+                            
+                            # Format location with DM mode (CA/NY/NJ resolution)
+                            locations = item.get("locations", [])
+                            location = format_location(locations, mode="dm")
+                            
+                            # Log location resolution for debugging
+                            if locations and len(locations) > 1:
+                                log_location_resolution(company, title, locations, location, "dm")
+                            
+                            line = format_job_line(company, title, season, location, url, html=False)
+                            all_new_entries.append({
+                                "key": key,
+                                "line": line,
+                                "ts": ts,
+                                "repo": repo
+                            })
+                            
+                            # Update seen cache with current timestamp (if TTL enabled)
+                            if seen is not None and now_epoch is not None:
+                                cache_key = get_cache_key(item)
+                                seen[cache_key] = now_epoch
         
-        debug_log(f"[DELTA] {repo} → commit {sha[:8]} new_entries={commit_new_count}, after_window={commit_window_count}")
+        debug_log(f"[DELTA] {repo} → commit {sha[:8]} new_entries={commit_new_count}, after_window={commit_window_count}, after_category={commit_category_count}")
     
     debug_log(f"[WATCH] {repo} → total accumulated entries: {len(all_new_entries)}")
     return all_new_entries
@@ -302,6 +376,24 @@ def main():
         safe_repo_name = repo.replace("/", "_")
         last_file = STATE_DIR / f"last_seen_{safe_repo_name}.txt"
         last_seen = last_file.read_text().strip() if last_file.exists() else None
+        
+        # Handle diagnostic inputs
+        if RESET_LAST_SEEN:
+            debug_log(f"[STATE] {repo} RESET_LAST_SEEN=true, ignoring cached SHA")
+            last_seen = None
+        elif BACK_ONE and last_seen:
+            # Set last_seen to parent of current last_seen to force re-check
+            try:
+                commit_info = gh_get(f"{GH}/repos/{repo}/commits/{last_seen}")
+                if commit_info.get("parents"):
+                    parent_sha = commit_info["parents"][0]["sha"]
+                    debug_log(f"[STATE] {repo} BACK_ONE=true, setting last_seen from {last_seen[:8]} to parent {parent_sha[:8]}")
+                    last_seen = parent_sha
+                else:
+                    debug_log(f"[STATE] {repo} BACK_ONE=true but commit {last_seen[:8]} has no parent")
+            except Exception as e:
+                debug_log(f"[STATE] {repo} BACK_ONE failed to get parent of {last_seen[:8]}: {e}")
+        
         debug_log(f"[STATE] {repo} last_seen_SHA: {last_seen[:8] if last_seen else 'None'}")
         
         try:

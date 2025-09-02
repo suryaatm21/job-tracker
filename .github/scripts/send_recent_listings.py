@@ -94,6 +94,63 @@ def should_include_listing(item):
     url = item.get("url", "").strip()
     return bool(url)  # Skip entries with falsy URLs
 
+# Category filtering: Only allow these categories from SimplifyJobs repo
+ALLOWED_CATEGORIES = {
+    "Software Engineering", 
+    "Data Science, AI & Machine Learning"
+}
+
+def classify_job_category(job):
+    """
+    Classify job category based on title and existing category field.
+    Returns category string or None if job should be filtered out.
+    """
+    # First check if there's an existing category field (SimplifyJobs has this)
+    if "category" in job and job["category"]:
+        category = job["category"].strip()
+        if category in ALLOWED_CATEGORIES:
+            return category
+        # If existing category is not in allowed list, filter out
+        return None
+    
+    # Fallback: classify by title if no category exists
+    title = job.get("title", "").lower()
+    
+    # Data Science & AI & Machine Learning (first priority for overlapping terms)
+    if any(term in title for term in ["data science", "artificial intelligence", "data scientist", "ai &", "machine learning", "ml", "data analytics", "data analyst", "research eng", "nlp", "computer vision", "research sci", "data eng"]):
+        return "Data Science, AI & Machine Learning"
+    
+    # Software Engineering (second priority)
+    elif any(term in title for term in ["software", "software eng", "software dev", "product engineer", "fullstack", "full-stack", "full stack", "frontend", "front end", "front-end", "backend", "back end", "back-end", "founding engineer", "mobile dev", "mobile engineer", "forward deployed", "forward-deployed"]):
+        return "Software Engineering"
+    
+    # Filter out other categories (Hardware, Quant, Product, Other, etc.)
+    else:
+        return None
+
+def should_process_repo_item(item, repo):
+    """
+    Filter items based on:
+    1. Basic quality checks (visible, has URL)
+    2. Repo-specific filtering (only SimplifyJobs for category filtering)  
+    3. Category filtering for SimplifyJobs
+    """
+    # Basic quality checks
+    if not should_include_listing(item):
+        return False, "quality"
+    
+    # Only apply category filtering to SimplifyJobs repo
+    if repo == "SimplifyJobs/Summer2026-Internships":
+        category = classify_job_category(item)
+        if category is None:
+            return False, "category"
+        # Store the category for later use
+        item["_classified_category"] = category
+        return True, "allowed"
+    
+    # Other repos: only basic quality checks
+    return True, "allowed"
+
 def send_telegram(text: str) -> bool:
     tok = os.getenv("TELEGRAM_BOT_TOKEN"); chat = os.getenv("TELEGRAM_CHAT_ID")
     if not tok or not chat:
@@ -147,8 +204,13 @@ def main() -> int:
             
             repo_items = []
             for x in data:
-                # Skip items with falsy URLs for better quality
-                if not should_include_listing(x):
+                # Apply repo-specific filtering (category filtering for SimplifyJobs)
+                should_process, filter_reason = should_process_repo_item(x, repo)
+                if not should_process:
+                    if filter_reason == "category":
+                        # Debug: log filtered items for SimplifyJobs repo
+                        debug_category = classify_job_category(x) or "unknown"
+                        print(f"Filtered out {x.get('company_name', 'Unknown')} - {x.get('title', 'Unknown')} (category: {debug_category})")
                     continue
                     
                 if sort_key(x) > 0:  # Valid timestamp

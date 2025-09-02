@@ -21,6 +21,16 @@ on:
         required: false
         default: "720"
         type: string
+      reset_last_seen:
+        description: "Ignore cached SHA this run (start fresh)"
+        required: false
+        default: false
+        type: boolean
+      back_one:
+        description: "Set last_seen = parent of latest commit (force re-check)"
+        required: false
+        default: false
+        type: boolean
 
 permissions:
   contents: read
@@ -111,6 +121,8 @@ jobs:
           SEEN_TTL_DAYS: ${{ env.SEEN_TTL_DAYS }}
           STATE_DIR: ${{ env.STATE_DIR }}
           FORCE_WINDOW_HOURS: ${{ github.event.inputs.force_window_hours }}
+          RESET_LAST_SEEN: ${{ github.event.inputs.reset_last_seen }}
+          BACK_ONE: ${{ github.event.inputs.back_one }}
         run: python .github/scripts/watch_repo.py
 
       - name: Save watcher state
