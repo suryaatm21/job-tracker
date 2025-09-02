@@ -7,6 +7,7 @@ from state_utils import (
     get_cache_key, format_epoch_for_log, should_include_item
 )
 from format_utils import format_location, log_location_resolution, format_job_line
+from telegram_utils import send_message
 
 # Multi-repo configuration
 TARGET_REPOS = json.loads(os.environ.get("TARGET_REPOS", '["vanshb03/Summer2026-Internships"]'))
@@ -20,6 +21,12 @@ DATE_FIELD = os.getenv("DATE_FIELD", "date_posted")
 DATE_FALLBACK = os.getenv("DATE_FALLBACK", "date_updated")
 WINDOW_HOURS = float(os.getenv("WINDOW_HOURS", "24"))  # Only alert for items in last N hours (default 24 hours)
 
+# Support for FORCE_WINDOW_HOURS override for testing
+FORCE_WINDOW_HOURS = os.getenv("FORCE_WINDOW_HOURS")
+if FORCE_WINDOW_HOURS and FORCE_WINDOW_HOURS.replace('.', '').isdigit():
+    WINDOW_HOURS = float(FORCE_WINDOW_HOURS)
+    debug_log(f"[CONFIG] FORCE_WINDOW_HOURS override: {WINDOW_HOURS} hours")
+
 # TTL configuration for seen cache
 SEEN_TTL_DAYS = int(os.getenv("SEEN_TTL_DAYS", "14"))
 
@@ -30,17 +37,21 @@ STATE_DIR.mkdir(exist_ok=True, parents=True)
 def get_default_branch(repo):
     """Get default branch for a repository"""
     repo_info = gh_get(f"{GH}/repos/{repo}")
-    return repo_info["default_branch"]
+    branch = repo_info["default_branch"]
+    debug_log(f"[BRANCH] {repo} default branch: {branch}")
+    return branch
 
 def detect_listings_path(repo, branch):
     """Auto-detect listings.json path within repo"""
     for path in [".github/scripts/listings.json", "listings.json"]:
         try:
             gh_get(f"{GH}/repos/{repo}/contents/{path}", ref=branch)
+            debug_log(f"[PATH] {repo} found listings at: {path}")
             return path
         except requests.HTTPError as e:
             if e.response.status_code != 404:
                 raise
+    debug_log(f"[PATH] {repo} using fallback path: {LISTINGS_PATH}")
     return LISTINGS_PATH  # fallback
 
 def get_repo_entries(repo, per_page=100):
@@ -53,32 +64,34 @@ def commit_detail(repo, sha):
 def get_file_at(repo, ref, path):
     """Fetch file content at specific git reference using robust helper"""
     try:
-        return fetch_file_content(repo, path, ref)
+        content = fetch_file_content(repo, path, ref)
+        debug_log(f"[FILE] {repo}:{path}@{ref[:8] if ref else 'HEAD'} → {len(content)} bytes")
+        return content
     except Exception as e:
         # file might not exist in older commit
         if "404" in str(e):
+            debug_log(f"[FILE] {repo}:{path}@{ref[:8] if ref else 'HEAD'} → not found (404)")
             return None
+        debug_log(f"[FILE] {repo}:{path}@{ref[:8] if ref else 'HEAD'} → error: {e}")
         raise
 
 def watched(path):
     return any(path == p or path.startswith(p) for p in WATCH_PATHS)
 
 def send_telegram(text):
-    debug_log(f"Attempting to send Telegram message: {text[:100]}...")
+    debug_log(f"[TELEGRAM] Sending message: {len(text)} chars, preview: {text[:100]}...")
     tok = os.getenv("TELEGRAM_BOT_TOKEN"); chat = os.getenv("TELEGRAM_CHAT_ID")
     if not tok or not chat: 
-        debug_log("Missing Telegram credentials - BOT_TOKEN or CHAT_ID not set")
+        debug_log("[TELEGRAM] Missing credentials - BOT_TOKEN or CHAT_ID not set")
         return False
     
-    try:
-        response = requests.post(f"https://api.telegram.org/bot{tok}/sendMessage",
-                      json={"chat_id": chat, "text": text, "disable_web_page_preview": True})
-        debug_log(f"Telegram API response: {response.status_code} - {response.text}")
-        response.raise_for_status()
-        return True
-    except Exception as e:
-        debug_log(f"Telegram send failed: {e}")
-        return False
+    success, status, body = send_message(tok, chat, text)
+    debug_log(f"[TELEGRAM] STATUS={status} BODY={body[:200] if body else 'None'}")
+    
+    if not success:
+        debug_log(f"[TELEGRAM] Send failed: {status} - {body}")
+    
+    return success
 
 def normalize_url(url):
     """Normalize URL to scheme+host+path for deduplication"""
@@ -132,44 +145,44 @@ def to_epoch(v):
 
 def process_repo_entries(repo, listings_path, last_seen_sha, seen=None, ttl_seconds=None, now_epoch=None):
     """Get new entries from a single repository"""
-    debug_log(f"Processing repo: {repo}")
+    debug_log(f"[WATCH] Processing repo: {repo}, last_seen={last_seen_sha[:8] if last_seen_sha else 'None'}")
     
     commits = get_repo_entries(repo, per_page=20)
     if not commits:
-        debug_log(f"No commits found in {repo}")
+        debug_log(f"[WATCH] {repo} → No commits found")
         return []
     
-    debug_log(f"Found {len(commits)} recent commits in {repo}")
+    debug_log(f"[WATCH] {repo} → considered_commits={len(commits)}, newest={commits[0]['sha'][:8]}")
     
     # Collect unseen commits (newest→oldest until last_seen)
     new = []
     for c in commits:
         if c["sha"] == last_seen_sha:
-            debug_log(f"Found last seen commit: {c['sha']} in {repo}")
+            debug_log(f"[WATCH] {repo} → found last seen commit: {c['sha'][:8]}")
             break
         new.append(c)
     
     if not new:
-        debug_log(f"No new commits since last run in {repo}")
+        debug_log(f"[WATCH] {repo} → No new commits since last run")
         return []
     
-    debug_log(f"Processing {len(new)} new commits in {repo}")
+    debug_log(f"[WATCH] {repo} → Processing {len(new)} new commits")
     
     # Accumulate new entries from all commits
     all_new_entries = []
     for c in reversed(new):  # oldest→newest
         sha = c["sha"]
         parent = c["parents"][0]["sha"] if c["parents"] else None
-        debug_log(f"Processing commit: {sha[:8]} in {repo}")
+        debug_log(f"[DELTA] {repo} → commit={sha[:8]}, parent={parent[:8] if parent else 'None'}")
         
         files = [f["filename"] for f in commit_detail(repo, sha).get("files", [])]
         watched_files = [f for f in files if watched(f)]
         
         if not watched_files:
-            debug_log(f"No watched files in commit {sha[:8]} of {repo}")
+            debug_log(f"[DELTA] {repo} → commit {sha[:8]} has no watched files (files: {files[:3]}...)")
             continue
         
-        debug_log(f"Watched files changed in {repo}: {watched_files}")
+        debug_log(f"[DELTA] {repo} → commit {sha[:8]} changed watched files: {watched_files}")
         
         # Fetch listings file content at before/after refs
         after_txt = get_file_at(repo, sha, listings_path)
@@ -178,13 +191,16 @@ def process_repo_entries(repo, listings_path, last_seen_sha, seen=None, ttl_seco
         try:
             after = json.loads(after_txt) if after_txt else []
             before = json.loads(before_txt) if before_txt else []
-            debug_log(f"Listings count in {repo} - Before: {len(before)}, After: {len(after)}")
+            debug_log(f"[DELTA] {repo} → commit {sha[:8]} parsed: before={len(before)}, after={len(after)}")
         except Exception as e:
-            debug_log(f"JSON parse failed in {repo}: {e}")
+            debug_log(f"[DELTA] {repo} → commit {sha[:8]} JSON parse failed: {e}")
             continue
         
         # Find new entries in this commit
         before_keys = {get_dedup_key(x) for x in before if get_dedup_key(x) and should_include_item(x)}
+        commit_new_count = 0
+        commit_window_count = 0
+        
         for item in after:
             # Skip items with falsy URLs or marked as not visible
             if not should_include_item(item):
@@ -192,12 +208,14 @@ def process_repo_entries(repo, listings_path, last_seen_sha, seen=None, ttl_seco
                 
             key = get_dedup_key(item)
             if key and key not in before_keys:
+                commit_new_count += 1
                 ts_val = item.get(DATE_FIELD, item.get(DATE_FALLBACK))
                 ts = to_epoch(ts_val)
                 
                 # Apply time window filter
                 cutoff = time.time() - (WINDOW_HOURS * 3600.0)
                 if ts >= cutoff:
+                    commit_window_count += 1
                     # Check TTL cache to see if we should alert for this item (if TTL enabled)
                     should_alert = True
                     if seen is not None and ttl_seconds is not None and now_epoch is not None:
@@ -229,14 +247,18 @@ def process_repo_entries(repo, listings_path, last_seen_sha, seen=None, ttl_seco
                         if seen is not None and now_epoch is not None:
                             cache_key = get_cache_key(item)
                             seen[cache_key] = now_epoch
+        
+        debug_log(f"[DELTA] {repo} → commit {sha[:8]} new_entries={commit_new_count}, after_window={commit_window_count}")
     
+    debug_log(f"[WATCH] {repo} → total accumulated entries: {len(all_new_entries)}")
     return all_new_entries
 
 def main():
-    debug_log(f"Starting multi-repo watch for: {TARGET_REPOS}")
-    debug_log(f"Watching paths: {WATCH_PATHS}")
-    debug_log(f"Listings file path hint: {LISTINGS_PATH}")
-    debug_log(f"SEEN_TTL_DAYS={SEEN_TTL_DAYS}")
+    debug_log(f"[CONFIG] Starting multi-repo watch for: {TARGET_REPOS}")
+    debug_log(f"[CONFIG] Watching paths: {WATCH_PATHS}")
+    debug_log(f"[CONFIG] Listings file path hint: {LISTINGS_PATH}")
+    debug_log(f"[CONFIG] WINDOW_HOURS={WINDOW_HOURS}, SEEN_TTL_DAYS={SEEN_TTL_DAYS}")
+    debug_log(f"[CONFIG] DATE_FIELD={DATE_FIELD}, DATE_FALLBACK={DATE_FALLBACK}")
     
     # Load seen cache and calculate TTL (use STATE_DIR)
     seen_cache_path = STATE_DIR / "seen.json"
@@ -280,7 +302,7 @@ def main():
         safe_repo_name = repo.replace("/", "_")
         last_file = STATE_DIR / f"last_seen_{safe_repo_name}.txt"
         last_seen = last_file.read_text().strip() if last_file.exists() else None
-        debug_log(f"Last seen SHA for {repo}: {last_seen}")
+        debug_log(f"[STATE] {repo} last_seen_SHA: {last_seen[:8] if last_seen else 'None'}")
         
         try:
             # Detect default branch and listings path
@@ -296,19 +318,19 @@ def main():
             if commits:
                 newest_sha = commits[0]["sha"]
                 last_file.write_text(newest_sha)
-                debug_log(f"Updated last seen SHA for {repo}: {newest_sha}")
+                debug_log(f"[STATE] {repo} updated last_seen_SHA: {newest_sha[:8]}")
         
         except Exception as e:
-            debug_log(f"Error processing repo {repo}: {e}")
+            debug_log(f"[ERROR] {repo} processing failed: {e}")
             continue
     
     if not all_entries:
-        debug_log("No new entries found across all repos")
+        debug_log("[RESULT] No new entries found across all repos")
         # Still save seen cache to prune old entries
-        save_seen(seen, SEEN_TTL_DAYS)
+        save_seen(seen, SEEN_TTL_DAYS, str(seen_cache_path))
         return
 
-    debug_log(f"Found {len(all_entries)} new entries before deduplication")
+    debug_log(f"[RESULT] Found {len(all_entries)} new entries before deduplication")
     
     # Deduplicate across all repos (keep first occurrence by timestamp desc)
     seen_keys = set()
@@ -322,7 +344,7 @@ def main():
             seen_keys.add(entry["key"])
             deduped_entries.append(entry)
     
-    debug_log(f"After deduplication: {len(deduped_entries)} unique entries")
+    debug_log(f"[RESULT] After deduplication: {len(deduped_entries)} unique entries")
     
     # Apply TTL-based filtering
     final_entries = []
@@ -352,7 +374,7 @@ def main():
             if reason == "ttl_expired":
                 debug_log(f"ALLOW-TTL key={cache_key} last={format_epoch_for_log(last_alert)} ttl={SEEN_TTL_DAYS}d")
     
-    debug_log(f"After TTL filtering: {len(final_entries)} entries to alert")
+    debug_log(f"[RESULT] After TTL filtering: {len(final_entries)} entries to alert")
     
     if final_entries:
         # Sort final entries by company name alphabetically, then by timestamp desc
@@ -362,10 +384,10 @@ def main():
         header = f"🔔 DM Alert: New internships detected ({len(final_entries)})"
         message = "\n".join([header] + lines)
         
-        debug_log(f"Sending message with {len(lines)} lines")
+        debug_log(f"[SEND] Sending message with {len(lines)} lines, ttl_allowed={len(final_entries)}")
         send_telegram(message)
     else:
-        debug_log("No messages to send after TTL filtering")
+        debug_log(f"[SEND] No messages to send after TTL filtering")
     
     # Save updated seen cache
     save_seen(seen, SEEN_TTL_DAYS, str(seen_cache_path))
