@@ -35,6 +35,11 @@ on:
 permissions:
   contents: read
 
+# Prevent overlapping dm-watcher runs
+concurrency:
+  group: dm-watcher-${{ github.ref }}
+  cancel-in-progress: false
+
 env:
   TARGET_REPOS: '["SimplifyJobs/Summer2026-Internships","vanshb03/Summer2026-Internships"]'
   WATCH_PATHS: '["listings.json"]'
@@ -54,15 +59,21 @@ jobs:
         with: { python-version: "3.11" }
       - run: pip install requests
 
+      # Calculate ISO week for rolling cache strategy
+      - name: Set ISO week
+        run: |
+          ISO_WEEK=$(date -u +%G-W%V)
+          echo "ISO_WEEK=$ISO_WEEK" >> $GITHUB_ENV
+          echo "Using ISO week: $ISO_WEEK"
+
       # Use separate cache for DM watcher state (commit SHAs + TTL cache)
       - name: Restore watcher state
         id: cache-restore
         uses: actions/cache/restore@v4
         with:
           path: .state/dm-watcher
-          key: dm-watcher-state-v1-${{ github.run_id }}
-          restore-keys: |
-            dm-watcher-state-v1-
+          key: dm-watcher-state-v1-${{ env.ISO_WEEK }}
+          restore-keys: dm-watcher-state-v1-
 
       - name: Validate Telegram env
         env:
@@ -108,6 +119,7 @@ jobs:
 
       # Scheduled watcher → DM (only when true additions within WINDOW_HOURS)
       - name: watcher (schedule + manual)
+        id: watcher
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
@@ -126,7 +138,8 @@ jobs:
         run: python .github/scripts/watch_repo.py
 
       - name: Save watcher state
+        if: steps.cache-restore.outputs.cache-hit != 'true' || steps.watcher.outputs.state_changed == 'true'
         uses: actions/cache/save@v4
         with:
           path: .state/dm-watcher
-          key: dm-watcher-state-v1-${{ github.run_id }}
+          key: dm-watcher-state-v1-${{ env.ISO_WEEK }}

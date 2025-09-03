@@ -51,17 +51,24 @@ jobs:
         with: { python-version: "3.11" }
       - run: pip install requests
 
+      # Calculate ISO week for rolling cache strategy
+      - name: Set ISO week
+        run: |
+          ISO_WEEK=$(date -u +%G-W%V)
+          echo "ISO_WEEK=$ISO_WEEK" >> $GITHUB_ENV
+          echo "Using ISO week: $ISO_WEEK"
+
       # Use separate cache for channel digest TTL state
       - name: Restore channel digest state
         id: cache-restore
         uses: actions/cache/restore@v4
         with:
           path: .state/channel-digest
-          key: channel-digest-state-v1-${{ github.run_id }}
-          restore-keys: |
-            channel-digest-state-v1-
+          key: channel-digest-state-v1-${{ env.ISO_WEEK }}
+          restore-keys: channel-digest-state-v1-
 
       - name: Run 4h digest to channel
+        id: digest
         if: github.event_name == 'schedule' || github.event.inputs.command == 'digest'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -114,8 +121,8 @@ jobs:
 
       # Save channel digest TTL state (separate from DM watcher)
       - name: Save channel digest state
-        if: always()
+        if: steps.cache-restore.outputs.cache-hit != 'true' || steps.digest.outputs.state_changed == 'true'
         uses: actions/cache/save@v4
         with:
           path: .state/channel-digest
-          key: channel-digest-state-v1-${{ github.run_id }}
+          key: channel-digest-state-v1-${{ env.ISO_WEEK }}
