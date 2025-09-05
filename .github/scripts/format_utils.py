@@ -81,7 +81,7 @@ def log_location_resolution(company, title, locations, resolved_location, mode):
     if mode == "dm" and len(locations) > 1 and resolved_location in ["California", "New York", "New Jersey"]:
         print(f"Resolved multi-location to {resolved_location} for {company} {title}")
 
-def format_job_line(company, title, season, location, url, html=False):
+def format_job_line(company, title, season, location, url, html=False, source=None):
     """
     Format a complete job listing line with optional location.
     
@@ -112,13 +112,18 @@ def format_job_line(company, title, season, location, url, html=False):
     
     bracket_str = " ".join(bracket_parts) if bracket_parts else ""
     
+    # Optionally append source to title if provided and not Simplify
+    title_with_source = title
+    if source and str(source).strip() and str(source).strip().lower() != "simplify":
+        title_with_source = f"{title} ({source})"
+
     # Format based on output type
     if html:
         # HTML format for Telegram channel digest
         company_formatted = f"<b>{company}</b>" if company else ""
-        line = f"• {company_formatted} — {title} {bracket_str}".strip()
+        line = f"• {company_formatted} — {title_with_source} {bracket_str}".strip()
         return f"{line}\n{url}".strip()
     else:
         # Plain text format for DM alerts
-        line = f"• {company} — {title} {bracket_str} {url}".strip()
+        line = f"• {company} — {title_with_source} {bracket_str} {url}".strip()
         return line

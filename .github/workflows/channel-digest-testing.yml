@@ -1,6 +1,8 @@
 name: Channel digest testing
 
 on:
+  schedule:
+    - cron: '0 * * * *' # Every hour
   workflow_dispatch:
     inputs:
       command:
@@ -36,7 +38,7 @@ env:
   LISTINGS_PATH: '.github/scripts/listings.json'
   DATE_FIELD: 'date_posted'
   DATE_FALLBACK: 'date_updated'
-  WINDOW_HOURS: '1' # 1 hour for regular digest
+  WINDOW_HOURS: '1' # 4 hours for regular digest
   SEEN_TTL_DAYS: '14' # Channel digest: longer TTL for less frequent updates
   STATE_DIR: '.state/channel-digest-testing' # Separate state directory for testing
 
@@ -49,13 +51,17 @@ jobs:
         with: { python-version: '3.11' }
       - run: pip install requests
 
+      # Compute weekly cache key component (ISO year-week)
+      - name: Compute ISO week key
+        run: echo "ISO_WEEK=$(date -u +'%G-W%V')" >> $GITHUB_ENV
+
       # Use separate cache for channel digest testing TTL state
       - name: Restore channel digest testing state
         id: cache-restore
         uses: actions/cache/restore@v4
         with:
           path: .state/channel-digest-testing
-          key: channel-digest-testing-state-v1-${{ github.run_id }}
+          key: channel-digest-testing-state-v1-${{ env.ISO_WEEK }}
           restore-keys: |
             channel-digest-testing-state-v1-
 
@@ -115,4 +121,4 @@ jobs:
         uses: actions/cache/save@v4
         with:
           path: .state/channel-digest-testing
-          key: channel-digest-testing-state-v1-${{ github.run_id }}
+          key: channel-digest-testing-state-v1-${{ env.ISO_WEEK }}
