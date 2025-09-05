@@ -54,13 +54,17 @@ jobs:
         with: { python-version: '3.11' }
       - run: pip install requests
 
+      # Compute weekly cache key component (ISO year-week)
+      - name: Compute ISO week key
+        run: echo "ISO_WEEK=$(date -u +'%G-W%V')" >> $GITHUB_ENV
+
       # Use separate cache for DM watcher state (commit SHAs + TTL cache)
       - name: Restore watcher state
         id: cache-restore
         uses: actions/cache/restore@v4
         with:
           path: .state/dm-watcher
-          key: dm-watcher-state-v1-${{ github.run_id }}
+          key: dm-watcher-state-v1-${{ env.ISO_WEEK }}
           restore-keys: |
             dm-watcher-state-v1-
 
@@ -126,7 +130,8 @@ jobs:
         run: python .github/scripts/watch_repo.py
 
       - name: Save watcher state
+        if: always()
         uses: actions/cache/save@v4
         with:
           path: .state/dm-watcher
-          key: dm-watcher-state-v1-${{ github.run_id }}
+          key: dm-watcher-state-v1-${{ env.ISO_WEEK }}

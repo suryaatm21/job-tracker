@@ -47,6 +47,24 @@ import pathlib
 STATE_DIR = pathlib.Path(os.environ.get("STATE_DIR", ".state"))
 STATE_DIR.mkdir(exist_ok=True, parents=True)
 
+# Category filtering for digest: allow several categories, exclude "Other"
+ALLOWED_CATEGORIES = {
+    "Software Engineering",
+    "Data Science, AI & Machine Learning",
+    "Hardware Engineering",
+    "Quantitative Finance",
+    "Product Management",
+}
+
+def is_allowed_category(item):
+    cat = (item.get("category") or "").strip()
+    if not cat:
+        return True  # No category info → keep
+    if cat == "Other":
+        return False
+    # If explicit allowed list provided, allow it; otherwise keep
+    return True if cat in ALLOWED_CATEGORIES else True
+
 def get_default_branch(repo):
     """Get default branch for a repository"""
     repo_info = gh_get(f"{GH}/repos/{repo}")
@@ -223,6 +241,9 @@ def main():
                 # Skip items with falsy URLs for better quality
                 if not should_include_listing(item):
                     continue
+                # Exclude explicit "Other" category to reduce noise
+                if not is_allowed_category(item):
+                    continue
                     
                 dt = parse_dt(item.get(DATE_FIELD)) or parse_dt(item.get(DATE_FALLBACK))
                 if dt and dt >= cutoff:
@@ -239,7 +260,14 @@ def main():
                             locations = item.get("locations", [])
                             location = format_location(locations, mode="digest")
                             
-                            line = format_job_line(company, title, season, location, url, html=True)
+                            # Derive a source tag (show when not Simplify)
+                            try:
+                                owner = repo.split("/")[0]
+                            except Exception:
+                                owner = ""
+                            source = "Simplify" if owner == "SimplifyJobs" else owner
+                            
+                            line = format_job_line(company, title, season, location, url, html=True, source=source)
                             entry = {
                                 "key": dedup_key,
                                 "dt": dt,
