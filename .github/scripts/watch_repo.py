@@ -293,7 +293,8 @@ def process_repo_entries(repo, listings_path, last_seen_sha, seen=None, ttl_seco
                         # Check TTL cache to see if we should alert for this item (if TTL enabled)
                         should_alert = True
                         if seen is not None and ttl_seconds is not None and now_epoch is not None:
-                            should_alert = should_alert_item(item, seen, ttl_seconds, now_epoch)
+                            _flag, _reason = should_alert_item(item, seen, ttl_seconds, now_epoch)
+                            should_alert = _flag
                         
                         if should_alert:
                             title = item.get("title", "")

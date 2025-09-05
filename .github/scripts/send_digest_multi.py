@@ -253,7 +253,8 @@ def main():
                 dt = parse_dt(item.get(DATE_FIELD)) or parse_dt(item.get(DATE_FALLBACK))
                 if dt and dt >= cutoff:
                     # Check TTL cache to see if we should alert for this item
-                    if should_alert_item(item, seen, ttl_seconds, now_epoch):
+                    should_alert, reason = should_alert_item(item, seen, ttl_seconds, now_epoch)
+                    if should_alert:
                         dedup_key = get_dedup_key(item)
                         if dedup_key:
                             company = item.get("company_name", "").strip()
