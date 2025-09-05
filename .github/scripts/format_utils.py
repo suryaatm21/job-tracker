@@ -49,7 +49,8 @@ def format_location(locations, mode="digest"):
         # Check for New York
         for loc in valid_locations:
             loc_lower = loc.lower()
-            if "new york" in loc_lower:
+            if ("new york" in loc_lower or "ny" in loc_lower or
+                "new york city" in loc_lower or "nyc" in loc_lower):
                 return "New York"
         
         # Check for NJ/New Jersey
@@ -97,19 +98,19 @@ def format_job_line(company, title, season, location, url, html=False):
         
     Examples:
         format_job_line("Tesla", "SWE Intern", "Summer 2026", "California", "https://...")
-        -> "• Tesla — SWE Intern [Summer 2026 | California] https://..."
+        -> "• <b>Tesla</b> — SWE Intern [Summer 2026] [California] https://..."
         
         format_job_line("Google", "DS Intern", "Summer 2026", "", "https://...", html=True)
         -> "• <b>Google</b> — DS Intern [Summer 2026]\nhttps://..."
     """
-    # Build bracket content
+    # Build bracket content - use separate brackets for season and location
     bracket_parts = []
     if season:
-        bracket_parts.append(season)
+        bracket_parts.append(f"[{season}]")
     if location:
-        bracket_parts.append(location)
+        bracket_parts.append(f"[{location}]")
     
-    bracket_str = f"[{' | '.join(bracket_parts)}]" if bracket_parts else ""
+    bracket_str = " ".join(bracket_parts) if bracket_parts else ""
     
     # Format based on output type
     if html:
