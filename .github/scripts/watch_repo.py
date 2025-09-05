@@ -314,13 +314,9 @@ def process_repo_entries(repo, listings_path, last_seen_sha, seen=None, ttl_seco
                                 "key": key,
                                 "line": line,
                                 "ts": ts,
-                                "repo": repo
+                                "repo": repo,
+                                "item": item
                             })
-                            
-                            # Update seen cache with current timestamp (if TTL enabled)
-                            if seen is not None and now_epoch is not None:
-                                cache_key = get_cache_key(item)
-                                seen[cache_key] = now_epoch
         
         debug_log(f"[DELTA] {repo} → commit {sha[:8]} new_entries={commit_new_count}, after_window={commit_window_count}, after_category={commit_category_count}")
     
@@ -438,13 +434,16 @@ def main():
     
     debug_log(f"[RESULT] After deduplication: {len(deduped_entries)} unique entries")
     
-    # Apply TTL-based filtering
+    # Apply TTL-based filtering (using cache key from the original item when available)
     final_entries = []
     for entry in deduped_entries:
-        # Reconstruct item dict for TTL checking (we need the raw item data)
-        # Note: This is a simplified approach - in practice, we'd need to pass the item through
-        # For now, we'll create a minimal item dict from the entry data
-        cache_key = entry["key"][1] if isinstance(entry["key"], tuple) else str(entry["key"])
+        # Prefer cache key from the original item for consistency
+        cache_key = None
+        if entry.get("item"):
+            cache_key = get_cache_key(entry["item"])
+        if not cache_key:
+            # Fallback: derive from dedup key tuple
+            cache_key = entry["key"][1] if isinstance(entry["key"], tuple) else str(entry["key"])
         
         # Check TTL (simplified - assumes entry represents a valid item)
         last_alert = seen.get(cache_key)
@@ -461,8 +460,6 @@ def main():
         
         if should_alert:
             final_entries.append(entry)
-            # Mark as seen for future runs
-            seen[cache_key] = now_epoch
             if reason == "ttl_expired":
                 debug_log(f"ALLOW-TTL key={cache_key} last={format_epoch_for_log(last_alert)} ttl={SEEN_TTL_DAYS}d")
     
@@ -477,7 +474,19 @@ def main():
         message = "\n".join([header] + lines)
         
         debug_log(f"[SEND] Sending message with {len(lines)} lines, ttl_allowed={len(final_entries)}")
-        send_telegram(message)
+        sent_ok = send_telegram(message)
+        if sent_ok:
+            # Mark as seen only after successful send
+            for entry in final_entries:
+                cache_key = None
+                if entry.get("item"):
+                    cache_key = get_cache_key(entry["item"])
+                if not cache_key:
+                    cache_key = entry["key"][1] if isinstance(entry["key"], tuple) else str(entry["key"])
+                if cache_key:
+                    seen[cache_key] = now_epoch
+        else:
+            debug_log("[SEND] Failed to send DM message; not marking items as seen")
     else:
         debug_log(f"[SEND] No messages to send after TTL filtering")
     

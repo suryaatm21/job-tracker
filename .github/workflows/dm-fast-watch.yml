@@ -64,8 +64,9 @@ jobs:
         uses: actions/cache/restore@v4
         with:
           path: .state/dm-watcher
-          key: dm-watcher-state-v1-${{ env.ISO_WEEK }}
+          key: dm-watcher-state-v1-${{ env.ISO_WEEK }}-${{ github.run_id }}
           restore-keys: |
+            dm-watcher-state-v1-${{ env.ISO_WEEK }}-
             dm-watcher-state-v1-
 
       - name: Validate Telegram env
@@ -134,4 +135,4 @@ jobs:
         uses: actions/cache/save@v4
         with:
           path: .state/dm-watcher
-          key: dm-watcher-state-v1-${{ env.ISO_WEEK }}
+          key: dm-watcher-state-v1-${{ env.ISO_WEEK }}-${{ github.run_id }}
