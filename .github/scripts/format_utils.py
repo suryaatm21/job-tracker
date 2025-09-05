@@ -46,11 +46,12 @@ def format_location(locations, mode="digest"):
             if "ca" in loc_lower or "california" in loc_lower:
                 return "California"
         
-        # Check for New York
+        # Check for New York (avoid substring false-positives like 'Albany')
+        import re
         for loc in valid_locations:
             loc_lower = loc.lower()
-            if ("new york" in loc_lower or "ny" in loc_lower or
-                "new york city" in loc_lower or "nyc" in loc_lower):
+            if ("new york city" in loc_lower or "new york" in loc_lower or "nyc" in loc_lower or
+                re.search(r"(^|[\s,(/-])ny(\b|[)\s,-])", loc_lower)):
                 return "New York"
         
         # Check for NJ/New Jersey
@@ -81,7 +82,7 @@ def log_location_resolution(company, title, locations, resolved_location, mode):
     if mode == "dm" and len(locations) > 1 and resolved_location in ["California", "New York", "New Jersey"]:
         print(f"Resolved multi-location to {resolved_location} for {company} {title}")
 
-def format_job_line(company, title, season, location, url, html=False, source=None):
+def format_job_line(company, title, season, location, url, source=None, html=False):
     """
     Format a complete job listing line with optional location.
     

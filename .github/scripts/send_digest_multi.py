@@ -57,13 +57,18 @@ ALLOWED_CATEGORIES = {
 }
 
 def is_allowed_category(item):
+    """Return True if item category is allowed for digest.
+    Policy: drop explicit "Other"; allow known useful categories; allow unknowns.
+    """
     cat = (item.get("category") or "").strip()
     if not cat:
         return True  # No category info → keep
     if cat == "Other":
         return False
-    # If explicit allowed list provided, allow it; otherwise keep
-    return True if cat in ALLOWED_CATEGORIES else True
+    if cat in ALLOWED_CATEGORIES:
+        return True
+    # Category present but not in allowlist and not "Other" → keep (soft filter)
+    return True
 
 def get_default_branch(repo):
     """Get default branch for a repository"""
@@ -313,12 +318,6 @@ def main():
     deduped_entries.sort(key=lambda x: (x["line"].split(" — ")[0].replace("• <b>", "").replace("</b>", "").lower(), x["dt"]), reverse=False)
     final_entries = deduped_entries[:COUNT]
     
-    # Update seen cache for entries we're about to send
-    for entry in final_entries:
-        if "item" in entry:
-            cache_key = get_cache_key(entry["item"])
-            seen[cache_key] = now_epoch
-    
     # Build message components
     header = f"📰 Channel Digest: New internships in last {WINDOW_HOURS}h ({len(final_entries)})"
     lines = [entry["line"] for entry in final_entries]
@@ -329,8 +328,13 @@ def main():
     
     if success:
         debug_log(f"[SEND] Digest sent successfully")
+        # Update seen cache only after a successful send
+        for entry in final_entries:
+            if "item" in entry:
+                cache_key = get_cache_key(entry["item"])
+                seen[cache_key] = now_epoch
     else:
-        debug_log(f"[SEND] Failed to send digest")
+        debug_log(f"[SEND] Failed to send digest; not marking items as seen")
     
     # Save updated seen cache regardless of send success
     save_seen(seen, SEEN_TTL_DAYS, str(seen_cache_path))
