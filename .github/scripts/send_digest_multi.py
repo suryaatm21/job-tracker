@@ -13,7 +13,7 @@ Environment variables:
 - GH_TOKEN: GitHub token for API access
 - TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID: Telegram credentials
 """
-import os, json, base64, requests, time, sys
+import os, json, base64, requests, time
 from datetime import datetime, timezone, timedelta
 from urllib.parse import urlparse
 from github_helper import fetch_file_json, debug_log, gh_get, GH
@@ -25,30 +25,13 @@ from state_utils import (
 from format_utils import format_location, log_location_resolution, format_job_line
 from telegram_utils import batch_send_message
 
-def set_github_output(name, value):
-    """Set GitHub Actions output"""
-    if github_output := os.getenv('GITHUB_OUTPUT'):
-        with open(github_output, 'a') as f:
-            f.write(f"{name}={value}\n")
-    else:
-        print(f"::set-output name={name}::{value}")
-
-def get_repo_source_tag(repo):
-    """Get source tag for repo"""
-    if "SimplifyJobs" in repo:
-        return "[Simplify]"
-    elif "vanshb03" in repo:
-        return "[Vansh]"
-    else:
-        return f"[{repo.split('/')[-1]}]"
-
 # Configuration
 TARGET_REPOS = json.loads(os.environ.get("TARGET_REPOS", '["vanshb03/Summer2026-Internships"]'))
 LISTINGS_PATH = os.environ.get("LISTINGS_PATH", ".github/scripts/listings.json")
 DATE_FIELD = os.environ.get("DATE_FIELD", "date_posted")
 DATE_FALLBACK = os.environ.get("DATE_FALLBACK", "date_updated")
 WINDOW_HOURS = int(os.environ.get("WINDOW_HOURS", "4"))  # Default 4 hours for channel digest
-COUNT = int(os.environ.get("COUNT", "100") or "100")  # Handle empty string case
+COUNT = int(os.environ.get("COUNT", "50") or "50")  # Handle empty string case
 
 # Support for FORCE_WINDOW_HOURS override for testing
 FORCE_WINDOW_HOURS = os.environ.get("FORCE_WINDOW_HOURS")
@@ -63,6 +46,24 @@ SEEN_TTL_DAYS = int(os.environ.get("SEEN_TTL_DAYS", "14"))
 import pathlib
 STATE_DIR = pathlib.Path(os.environ.get("STATE_DIR", ".state"))
 STATE_DIR.mkdir(exist_ok=True, parents=True)
+
+# Category filtering for digest: allow several categories, exclude "Other"
+ALLOWED_CATEGORIES = {
+    "Software Engineering",
+    "Data Science, AI & Machine Learning",
+    "Hardware Engineering",
+    "Quantitative Finance",
+    "Product Management",
+}
+
+def is_allowed_category(item):
+    cat = (item.get("category") or "").strip()
+    if not cat:
+        return True  # No category info → keep
+    if cat == "Other":
+        return False
+    # If explicit allowed list provided, allow it; otherwise keep
+    return True if cat in ALLOWED_CATEGORIES else True
 
 def get_default_branch(repo):
     """Get default branch for a repository"""
@@ -211,13 +212,9 @@ def main():
     debug_log(f"[CONFIG] Time window: {WINDOW_HOURS} hours, Max items: {COUNT}")
     debug_log(f"[CONFIG] SEEN_TTL_DAYS={SEEN_TTL_DAYS}")
     
-    # Track if any state changed during this run
-    state_changed = False
-    
     # Load seen cache and calculate TTL (use STATE_DIR)
     seen_cache_path = STATE_DIR / "seen.json"
     seen = load_seen(str(seen_cache_path))
-    seen_initial_size = len(seen) if seen else 0
     ttl_seconds = SEEN_TTL_DAYS * 24 * 3600
     now_epoch = int(time.time())
     
@@ -244,6 +241,9 @@ def main():
                 # Skip items with falsy URLs for better quality
                 if not should_include_listing(item):
                     continue
+                # Exclude explicit "Other" category to reduce noise
+                if not is_allowed_category(item):
+                    continue
                     
                 dt = parse_dt(item.get(DATE_FIELD)) or parse_dt(item.get(DATE_FALLBACK))
                 if dt and dt >= cutoff:
@@ -260,7 +260,14 @@ def main():
                             locations = item.get("locations", [])
                             location = format_location(locations, mode="digest")
                             
-                            line = format_job_line(company, title, season, location, url, html=True)
+                            # Derive a source tag (show when not Simplify)
+                            try:
+                                owner = repo.split("/")[0]
+                            except Exception:
+                                owner = ""
+                            source = "Simplify" if owner == "SimplifyJobs" else owner
+                            
+                            line = format_job_line(company, title, season, location, url, html=True, source=source)
                             entry = {
                                 "key": dedup_key,
                                 "dt": dt,
@@ -302,12 +309,15 @@ def main():
         save_seen(seen, SEEN_TTL_DAYS, str(seen_cache_path))
         return
     
-    # Sort final entries by company name alphabetically, then by timestamp desc
-    # Remove COUNT limit - batching handles long messages automatically
+    # Sort final entries by company name alphabetically, then by timestamp desc, and limit to COUNT
     deduped_entries.sort(key=lambda x: (x["line"].split(" — ")[0].replace("• <b>", "").replace("</b>", "").lower(), x["dt"]), reverse=False)
-    final_entries = deduped_entries  # No artificial limit
+    final_entries = deduped_entries[:COUNT]
     
-    # Don't update seen cache yet - wait until after successful send
+    # Update seen cache for entries we're about to send
+    for entry in final_entries:
+        if "item" in entry:
+            cache_key = get_cache_key(entry["item"])
+            seen[cache_key] = now_epoch
     
     # Build message components
     header = f"📰 Channel Digest: New internships in last {WINDOW_HOURS}h ({len(final_entries)})"
@@ -319,26 +329,12 @@ def main():
     
     if success:
         debug_log(f"[SEND] Digest sent successfully")
-        # Only mark items as seen after successful send
-        for entry in final_entries:
-            if "item" in entry:
-                cache_key = get_cache_key(entry["item"])
-                seen[cache_key] = now_epoch
-        
-        debug_log(f"[STATE] Marked {len(final_entries)} entries as seen after successful send")
-        state_changed = True
     else:
-        debug_log(f"[SEND] Failed to send digest - not marking items as seen")
+        debug_log(f"[SEND] Failed to send digest")
     
-    # Save updated seen cache
-    if len(seen) != seen_initial_size:
-        state_changed = True
-    
+    # Save updated seen cache regardless of send success
     save_seen(seen, SEEN_TTL_DAYS, str(seen_cache_path))
-    
-    # Set GitHub Actions output for cache save decision
-    set_github_output("state_changed", "true" if state_changed else "false")
-    debug_log(f"[STATE] Overall state_changed: {state_changed}")
+    debug_log(f"[STATE] Updated seen cache with {len(final_entries)} entries")
 
 if __name__ == "__main__":
     main()

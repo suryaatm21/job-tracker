@@ -16,15 +16,6 @@ from urllib.parse import urlparse
 from github_helper import fetch_file_content, fetch_file_json, debug_log, gh_get, GH
 from format_utils import format_location, format_job_line
 
-def get_repo_source_tag(repo):
-    """Get source tag for repo"""
-    if "SimplifyJobs" in repo:
-        return "[Simplify]"
-    elif "vanshb03" in repo:
-        return "[Vansh]"
-    else:
-        return f"[{repo.split('/')[-1]}]"
-
 # Multi-repo support with fallback to single repo
 TARGET_REPOS_STR = os.getenv("TARGET_REPOS")
 if TARGET_REPOS_STR:
@@ -260,25 +251,13 @@ def main() -> int:
         ts = sort_key(x)
         when = datetime.utcfromtimestamp(ts).strftime("%Y-%m-%d") if ts > 0 else ""
         
-        # Get source repo for tagging
-        source_repo = x.get("_source_repo", "")
-        source_tag = get_repo_source_tag(source_repo) if source_repo else ""
-        
-        # Format: • Company — Title [Season] [Location] [Source] (date)
-        # Build bracket components
-        bracket_parts = []
-        if season:
-            bracket_parts.append(f"[{season}]")
-        if location:
-            bracket_parts.append(f"[{location}]")
-        if source_tag:
-            bracket_parts.append(source_tag)
-        
-        bracket_str = " ".join(bracket_parts)
-        date_str = f" ({when})" if when else ""
-        
-        # Format for HTML (channel usage) 
-        line = f"• <b>{company}</b> — {title} {bracket_str}{date_str}\n{url}"
+        # Format the line using the helper, then add date info
+        line = format_job_line(company, title, season, location, url, html=True)
+        if when:
+            # Insert the date before the URL
+            line_parts = line.split('\n')
+            if len(line_parts) == 2:
+                line = f"{line_parts[0]} ({when})\n{line_parts[1]}"
         lines.append(line)
 
     # Add context prefix if provided
