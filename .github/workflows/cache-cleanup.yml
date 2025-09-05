@@ -40,7 +40,7 @@ jobs:
         run: |
           gh api repos/${{ github.repository }}/actions/caches --paginate --jq '.actions_caches[]' \
             | jq -r '"\(.id) | \(.key) | \(.size_in_bytes) bytes | created \(.created_at)"' \
-            | head -100
+            | awk 'NR<=100'
 
       - name: Delete old caches (keep N newest per prefix; delete others)
         if: ${{ github.event.inputs.dry_run != 'true' }}
@@ -68,7 +68,7 @@ jobs:
           for p in "${prefixes[@]}"; do
             echo "Processing prefix: $p (keeping $KEEP_N)"
             gh api repos/${{ github.repository }}/actions/caches --paginate --jq '.actions_caches[]' \
-              | jq -r 'select(.key | startswith("'"$p"'")) | [.id, .key, .created_at] | @tsv' \
+              | jq --arg prefix "$p" -r 'select(.key | startswith($prefix)) | [.id, .key, .created_at] | @tsv' \
               | sort -k3 -r \
               | awk -v keep="$KEEP_N" 'NR>keep {print $0}' \
               | cut -f1 \
@@ -86,4 +86,4 @@ jobs:
         run: |
           gh api repos/${{ github.repository }}/actions/caches --paginate --jq '.actions_caches[]' \
             | jq -r '"\(.id) | \(.key) | \(.size_in_bytes) bytes | created \(.created_at)"' \
-            | head -100
+            | awk 'NR<=100'
