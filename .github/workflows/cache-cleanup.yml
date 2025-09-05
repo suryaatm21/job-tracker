@@ -40,7 +40,7 @@ jobs:
         run: |
           gh api repos/${{ github.repository }}/actions/caches --paginate --jq '.actions_caches[]' \
             | jq -r '"\(.id) | \(.key) | \(.size_in_bytes) bytes | created \(.created_at)"' \
-            | head -100
+            | awk 'NR<=100'
 
       - name: Delete old caches (keep N newest per prefix; delete others)
         if: ${{ github.event.inputs.dry_run != 'true' }}
@@ -86,4 +86,4 @@ jobs:
         run: |
           gh api repos/${{ github.repository }}/actions/caches --paginate --jq '.actions_caches[]' \
             | jq -r '"\(.id) | \(.key) | \(.size_in_bytes) bytes | created \(.created_at)"' \
-            | head -100
+            | awk 'NR<=100'
