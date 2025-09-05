@@ -56,6 +56,12 @@ Environment variables in workflows:
 - **Purpose**: Batched summaries for channels
 - **Features**: HTML formatting, message batching, longer time windows
 
+### Channel Digest Testing (`.github/workflows/channel-digest-testing.yml`)
+
+- **Schedule**: Every hour
+- **Purpose**: Isolated testing of channel digest logic
+- **Features**: Same as `channel-digest.yml` but designed for testing and validation
+
 ## Architecture
 
 ```
