@@ -12,7 +12,12 @@ on:
       keep_prefixes:
         description: "Comma-separated prefixes to keep"
         required: false
-        default: "dm-watcher-state-v1-2025,channel-digest-state-v1-2025,channel-digest-testing-state-v1-2025"
+        default: "dm-watcher-state-v1,channel-digest-state-v1,channel-digest-testing-state-v1"
+        type: string
+      keep_n_per_prefix:
+        description: "How many newest caches to keep per prefix"
+        required: false
+        default: "3"
         type: string
 
 permissions:
@@ -23,47 +28,62 @@ jobs:
   cleanup:
     runs-on: ubuntu-latest
     steps:
-      - name: Setup gh CLI
-        uses: cli/cli@v3
-        with:
-          version: latest
+      - name: Ensure jq is available
+        run: |
+          if ! command -v jq >/dev/null 2>&1; then
+            sudo apt-get update && sudo apt-get install -y jq
+          fi
 
       - name: Show cache summary (before)
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          gh api repos/${{ github.repository }}/actions/caches --paginate \
-            | jq -r '.actions_caches[] | "\(.id) | \(.key) | \(.size_in_bytes) bytes | created \(.created_at)"' \
+          gh api repos/${{ github.repository }}/actions/caches --paginate --jq '.actions_caches[]' \
+            | jq -r '"\(.id) | \(.key) | \(.size_in_bytes) bytes | created \(.created_at)"' \
             | head -100
 
-      - name: Delete old caches (respect keep prefixes)
+      - name: Delete old caches (keep N newest per prefix; delete others)
         if: ${{ github.event.inputs.dry_run != 'true' }}
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          KEEP: ${{ github.event.inputs.keep_prefixes }}
+          KEEP_PREFIXES: ${{ github.event.inputs.keep_prefixes }}
+          KEEP_N: ${{ github.event.inputs.keep_n_per_prefix || '3' }}
         run: |
-          IFS=',' read -r -a keep <<< "$KEEP"
-          gh api repos/${{ github.repository }}/actions/caches --paginate \
-            | jq -r '.actions_caches[] | [.id, .key] | @tsv' \
+          IFS=',' read -r -a prefixes <<< "$KEEP_PREFIXES"
+          # Delete caches not matching any prefix
+          gh api repos/${{ github.repository }}/actions/caches --paginate --jq '.actions_caches[]' \
+            | jq -r '[.id, .key] | @tsv' \
             | while IFS=$'\t' read -r id key; do
-                skip=0
-                for p in "${keep[@]}"; do
-                  if [[ "$key" == "$p"* ]]; then skip=1; break; fi
+                match=0
+                for p in "${prefixes[@]}"; do
+                  [[ "$key" == "$p"* ]] && match=1 && break
                 done
-                if [[ $skip -eq 0 ]]; then
-                  echo "Deleting cache id=$id key=$key"
+                if [[ $match -eq 0 ]]; then
+                  echo "Deleting non-matching cache id=$id key=$key"
                   gh api -X DELETE repos/${{ github.repository }}/actions/caches/$id || true
-                else
-                  echo "Keeping cache key=$key"
                 fi
               done
+
+          # For each prefix, keep only the newest N and delete older ones
+          for p in "${prefixes[@]}"; do
+            echo "Processing prefix: $p (keeping $KEEP_N)"
+            gh api repos/${{ github.repository }}/actions/caches --paginate --jq '.actions_caches[]' \
+              | jq -r 'select(.key | startswith("'"$p"'")) | [.id, .key, .created_at] | @tsv' \
+              | sort -k3 -r \
+              | awk -v keep="$KEEP_N" 'NR>keep {print $0}' \
+              | cut -f1 \
+              | while read -r id; do
+                  [[ -z "$id" ]] && continue
+                  echo "Deleting older cache id=$id (prefix=$p)"
+                  gh api -X DELETE repos/${{ github.repository }}/actions/caches/$id || true
+                done
+          done
 
       - name: Show cache summary (after)
         if: ${{ github.event.inputs.dry_run != 'true' }}
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          gh api repos/${{ github.repository }}/actions/caches --paginate \
-            | jq -r '.actions_caches[] | "\(.id) | \(.key) | \(.size_in_bytes) bytes | created \(.created_at)"' \
+          gh api repos/${{ github.repository }}/actions/caches --paginate --jq '.actions_caches[]' \
+            | jq -r '"\(.id) | \(.key) | \(.size_in_bytes) bytes | created \(.created_at)"' \
             | head -100
-
