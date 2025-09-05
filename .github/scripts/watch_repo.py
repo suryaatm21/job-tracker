@@ -1,4 +1,4 @@
-import os, json, requests, pathlib, base64, time, sys
+import os, json, requests, pathlib, base64, time
 from datetime import datetime
 from urllib.parse import urlparse
 from github_helper import fetch_file_content, fetch_file_json, debug_log, gh_get, GH
@@ -8,23 +8,6 @@ from state_utils import (
 )
 from format_utils import format_location, log_location_resolution, format_job_line
 from telegram_utils import send_message
-
-def set_github_output(name, value):
-    """Set GitHub Actions output"""
-    if github_output := os.getenv('GITHUB_OUTPUT'):
-        with open(github_output, 'a') as f:
-            f.write(f"{name}={value}\n")
-    else:
-        print(f"::set-output name={name}::{value}")
-
-def get_repo_source_tag(repo):
-    """Get source tag for repo"""
-    if "SimplifyJobs" in repo:
-        return "[Simplify]"
-    elif "vanshb03" in repo:
-        return "[Vansh]"
-    else:
-        return f"[{repo.split('/')[-1]}]"
 
 # Multi-repo configuration
 TARGET_REPOS = json.loads(os.environ.get("TARGET_REPOS", '["vanshb03/Summer2026-Internships"]'))
@@ -326,20 +309,7 @@ def process_repo_entries(repo, listings_path, last_seen_sha, seen=None, ttl_seco
                             if locations and len(locations) > 1:
                                 log_location_resolution(company, title, locations, location, "dm")
                             
-                            # Format: • Company — Title [Season] [Location] [Source]
-                            source_tag = get_repo_source_tag(repo)
-                            
-                            # Build bracket components
-                            bracket_parts = []
-                            if season:
-                                bracket_parts.append(f"[{season}]")
-                            if location:
-                                bracket_parts.append(f"[{location}]")
-                            bracket_parts.append(source_tag)
-                            
-                            bracket_str = " ".join(bracket_parts)
-                            line = f"• {company} — {title} {bracket_str} {url}".strip()
-                            
+                            line = format_job_line(company, title, season, location, url, html=False)
                             all_new_entries.append({
                                 "key": key,
                                 "line": line,
@@ -363,9 +333,6 @@ def main():
     debug_log(f"[CONFIG] Listings file path hint: {LISTINGS_PATH}")
     debug_log(f"[CONFIG] WINDOW_HOURS={WINDOW_HOURS}, SEEN_TTL_DAYS={SEEN_TTL_DAYS}")
     debug_log(f"[CONFIG] DATE_FIELD={DATE_FIELD}, DATE_FALLBACK={DATE_FALLBACK}")
-    
-    # Track if any state files changed during this run
-    state_changed = False
     
     # Load seen cache and calculate TTL (use STATE_DIR)
     seen_cache_path = STATE_DIR / "seen.json"
@@ -400,16 +367,14 @@ def main():
         if seen:
             save_seen(seen, SEEN_TTL_DAYS, str(seen_cache_path))
             debug_log(f"Saved pre-populated cache with {len(seen)} items")
-            state_changed = True
     
     all_entries = []
     
     # Process each repository
     for repo in TARGET_REPOS:
-        # Get per-repo state file - use owner_repo format as required
-        repo_parts = repo.split("/")
-        owner, repo_name = repo_parts[0], repo_parts[1]
-        last_file = STATE_DIR / f"last_seen_{owner}_{repo_name}.txt"
+        # Get per-repo state file
+        safe_repo_name = repo.replace("/", "_")
+        last_file = STATE_DIR / f"last_seen_{safe_repo_name}.txt"
         last_seen = last_file.read_text().strip() if last_file.exists() else None
         
         # Handle diagnostic inputs
@@ -444,15 +409,8 @@ def main():
             commits = get_repo_entries(repo, per_page=1)
             if commits:
                 newest_sha = commits[0]["sha"]
-                old_sha = last_file.read_text().strip() if last_file.exists() else None
-                
-                # Only update if SHA actually changed
-                if old_sha != newest_sha:
-                    last_file.write_text(newest_sha)
-                    debug_log(f"[STATE] {repo} updated last_seen_SHA: {newest_sha[:8]}")
-                    state_changed = True
-                else:
-                    debug_log(f"[STATE] {repo} last_seen_SHA unchanged: {newest_sha[:8]}")
+                last_file.write_text(newest_sha)
+                debug_log(f"[STATE] {repo} updated last_seen_SHA: {newest_sha[:8]}")
         
         except Exception as e:
             debug_log(f"[ERROR] {repo} processing failed: {e}")
@@ -513,7 +471,7 @@ def main():
     if final_entries:
         # Sort final entries by company name alphabetically, then by timestamp desc
         final_entries.sort(key=lambda x: (x["line"].split(" — ")[0].replace("• ", "").lower(), -x["ts"]))
-        lines = [entry["line"] for entry in final_entries]  # No max-items cap, batching handles long messages
+        lines = [entry["line"] for entry in final_entries[:10]]
         
         header = f"🔔 DM Alert: New internships detected ({len(final_entries)})"
         message = "\n".join([header] + lines)
@@ -523,15 +481,8 @@ def main():
     else:
         debug_log(f"[SEND] No messages to send after TTL filtering")
     
-    # Save updated seen cache if it changed
-    seen_before_size = len(seen) if seen else 0
+    # Save updated seen cache
     save_seen(seen, SEEN_TTL_DAYS, str(seen_cache_path))
-    if len(seen) != seen_before_size:
-        state_changed = True
-    
-    # Set GitHub Actions output for cache save decision
-    set_github_output("state_changed", "true" if state_changed else "false")
-    debug_log(f"[STATE] Overall state_changed: {state_changed}")
 
 if __name__ == "__main__":
     main()

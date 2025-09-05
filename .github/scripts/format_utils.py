@@ -49,7 +49,8 @@ def format_location(locations, mode="digest"):
         # Check for New York
         for loc in valid_locations:
             loc_lower = loc.lower()
-            if "new york" in loc_lower:
+            if ("new york" in loc_lower or "ny" in loc_lower or
+                "new york city" in loc_lower or "nyc" in loc_lower):
                 return "New York"
         
         # Check for NJ/New Jersey
@@ -80,7 +81,7 @@ def log_location_resolution(company, title, locations, resolved_location, mode):
     if mode == "dm" and len(locations) > 1 and resolved_location in ["California", "New York", "New Jersey"]:
         print(f"Resolved multi-location to {resolved_location} for {company} {title}")
 
-def format_job_line(company, title, season, location, url, html=False):
+def format_job_line(company, title, season, location, url, html=False, source=None):
     """
     Format a complete job listing line with optional location.
     
@@ -97,27 +98,32 @@ def format_job_line(company, title, season, location, url, html=False):
         
     Examples:
         format_job_line("Tesla", "SWE Intern", "Summer 2026", "California", "https://...")
-        -> "• Tesla — SWE Intern [Summer 2026 | California] https://..."
+        -> "• <b>Tesla</b> — SWE Intern [Summer 2026] [California] https://..."
         
         format_job_line("Google", "DS Intern", "Summer 2026", "", "https://...", html=True)
         -> "• <b>Google</b> — DS Intern [Summer 2026]\nhttps://..."
     """
-    # Build bracket content
+    # Build bracket content - use separate brackets for season and location
     bracket_parts = []
     if season:
-        bracket_parts.append(season)
+        bracket_parts.append(f"[{season}]")
     if location:
-        bracket_parts.append(location)
+        bracket_parts.append(f"[{location}]")
     
-    bracket_str = f"[{' | '.join(bracket_parts)}]" if bracket_parts else ""
+    bracket_str = " ".join(bracket_parts) if bracket_parts else ""
     
+    # Optionally append source to title if provided and not Simplify
+    title_with_source = title
+    if source and str(source).strip() and str(source).strip().lower() != "simplify":
+        title_with_source = f"{title} ({source})"
+
     # Format based on output type
     if html:
         # HTML format for Telegram channel digest
         company_formatted = f"<b>{company}</b>" if company else ""
-        line = f"• {company_formatted} — {title} {bracket_str}".strip()
+        line = f"• {company_formatted} — {title_with_source} {bracket_str}".strip()
         return f"{line}\n{url}".strip()
     else:
         # Plain text format for DM alerts
-        line = f"• {company} — {title} {bracket_str} {url}".strip()
+        line = f"• {company} — {title_with_source} {bracket_str} {url}".strip()
         return line
