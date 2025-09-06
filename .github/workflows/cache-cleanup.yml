@@ -43,8 +43,10 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          gh api repos/${{ github.repository }}/actions/caches --paginate --jq '.actions_caches[]' \
-            | jq -r '"\(.id) | \(.key) | \(.size_in_bytes) bytes | created \(.created_at)"' \
+          set -euo pipefail
+          gh api repos/${{ github.repository }}/actions/caches \
+            --paginate \
+            --jq '.actions_caches[]? | "\(.id) | \(.key) | \(.size_in_bytes) bytes | created \(.created_at)"' \
             | awk 'NR<=100'
 
       - name: Delete old caches (keep N newest per prefix; delete others)
@@ -54,6 +56,9 @@ jobs:
           KEEP_PREFIXES: ${{ github.event.inputs.keep_prefixes || env.DEFAULT_KEEP_PREFIXES }}
           KEEP_N: ${{ github.event.inputs.keep_n_per_prefix || env.DEFAULT_KEEP_N }}
         run: |
+          set -euo pipefail
+          echo "KEEP_PREFIXES=${KEEP_PREFIXES}"
+          echo "KEEP_N=${KEEP_N}"
           # Build prefixes array, dropping empty entries
           IFS=',' read -r -a raw_prefixes <<< "$KEEP_PREFIXES"
           prefixes=()
@@ -66,7 +71,7 @@ jobs:
             exit 0
           fi
           # Delete caches not matching any prefix
-          gh api repos/${{ github.repository }}/actions/caches --paginate --jq '.actions_caches[]' \
+          gh api repos/${{ github.repository }}/actions/caches --paginate --jq '.actions_caches[]?' \
             | jq -r '[.id, .key] | @tsv' \
             | while IFS=$'\t' read -r id key; do
                 match=0
@@ -82,7 +87,7 @@ jobs:
           # For each prefix, keep only the newest N and delete older ones
           for p in "${prefixes[@]}"; do
             echo "Processing prefix: $p (keeping $KEEP_N)"
-            gh api repos/${{ github.repository }}/actions/caches --paginate --jq '.actions_caches[]' \
+            gh api repos/${{ github.repository }}/actions/caches --paginate --jq '.actions_caches[]?' \
               | jq --arg prefix "$p" -r 'select(.key | startswith($prefix)) | [.id, .key, .created_at] | @tsv' \
               | sort -k3 -r \
               | awk -v keep="$KEEP_N" 'NR>keep {print $0}' \
@@ -99,6 +104,8 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          gh api repos/${{ github.repository }}/actions/caches --paginate --jq '.actions_caches[]' \
-            | jq -r '"\(.id) | \(.key) | \(.size_in_bytes) bytes | created \(.created_at)"' \
+          set -euo pipefail
+          gh api repos/${{ github.repository }}/actions/caches \
+            --paginate \
+            --jq '.actions_caches[]? | "\(.id) | \(.key) | \(.size_in_bytes) bytes | created \(.created_at)"' \
             | awk 'NR<=100'
