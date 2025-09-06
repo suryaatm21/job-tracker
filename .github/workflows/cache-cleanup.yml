@@ -2,7 +2,7 @@ name: Cache cleanup
 
 on:
   schedule:
-    - cron: '0 7 * * 1' # Weekly cleanup: Mondays 07:00 UTC
+    - cron: '0 8 * * *' # Daily cleanup: 08:00 UTC
   workflow_dispatch:
     inputs:
       dry_run:
@@ -29,6 +29,9 @@ permissions:
 jobs:
   cleanup:
     runs-on: ubuntu-latest
+    env:
+      DEFAULT_KEEP_PREFIXES: dm-watcher-state-v1,channel-digest-state-v1,channel-digest-testing-state-v1
+      DEFAULT_KEEP_N: "3"
     steps:
       - name: Ensure jq is available
         run: |
@@ -48,10 +51,20 @@ jobs:
         if: ${{ github.event.inputs.dry_run != 'true' }}
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          KEEP_PREFIXES: ${{ github.event.inputs.keep_prefixes }}
-          KEEP_N: ${{ github.event.inputs.keep_n_per_prefix || '3' }}
+          KEEP_PREFIXES: ${{ github.event.inputs.keep_prefixes || env.DEFAULT_KEEP_PREFIXES }}
+          KEEP_N: ${{ github.event.inputs.keep_n_per_prefix || env.DEFAULT_KEEP_N }}
         run: |
-          IFS=',' read -r -a prefixes <<< "$KEEP_PREFIXES"
+          # Build prefixes array, dropping empty entries
+          IFS=',' read -r -a raw_prefixes <<< "$KEEP_PREFIXES"
+          prefixes=()
+          for p in "${raw_prefixes[@]}"; do
+            p_trimmed="${p// /}"
+            [[ -n "$p_trimmed" ]] && prefixes+=("$p_trimmed")
+          done
+          if [[ ${#prefixes[@]} -eq 0 ]]; then
+            echo "No valid KEEP_PREFIXES provided; skipping deletion to avoid unintended pruning."
+            exit 0
+          fi
           # Delete caches not matching any prefix
           gh api repos/${{ github.repository }}/actions/caches --paginate --jq '.actions_caches[]' \
             | jq -r '[.id, .key] | @tsv' \
@@ -75,7 +88,7 @@ jobs:
               | awk -v keep="$KEEP_N" 'NR>keep {print $0}' \
               | cut -f1 \
               | while read -r id; do
-                  [[ -z "$id" ]] && continue
+              	  [[ -z "$id" ]] && continue
                   echo "Deleting older cache id=$id (prefix=$p)"
                   gh api -X DELETE repos/${{ github.repository }}/actions/caches/$id || true
                 done
