@@ -1,8 +1,8 @@
-name: Channel digest (4h)
+name: Channel digest (2h)
 
 on:
   schedule:
-    - cron: '0 */4 * * *'
+    - cron: '0 */2 * * *'
   workflow_dispatch:
     inputs:
       command:
@@ -18,7 +18,7 @@ on:
       count:
         description: 'Max items to include (digest) or N for recent'
         required: false
-        default: '50'
+        default: '100'
       force_window_hours:
         description: 'Override WINDOW_HOURS for testing (e.g., 720 for 30 days)'
         required: false
@@ -38,7 +38,7 @@ env:
   LISTINGS_PATH: '.github/scripts/listings.json'
   DATE_FIELD: 'date_posted'
   DATE_FALLBACK: 'date_updated'
-  WINDOW_HOURS: '4' # 4 hours for regular digest
+  WINDOW_HOURS: '2' # 2 hours for regular digest
   SEEN_TTL_DAYS: '14' # Channel digest: longer TTL for less frequent updates
   STATE_DIR: '.state/channel-digest' # Separate state directory for channel digest
 
