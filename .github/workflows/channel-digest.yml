@@ -38,7 +38,7 @@ env:
   LISTINGS_PATH: '.github/scripts/listings.json'
   DATE_FIELD: 'date_posted'
   DATE_FALLBACK: 'date_updated'
-  WINDOW_HOURS: '4' # 4 hours for regular digest
+  WINDOW_HOURS: '2' # 2 hours for regular digest
   SEEN_TTL_DAYS: '14' # Channel digest: longer TTL for less frequent updates
   STATE_DIR: '.state/channel-digest' # Separate state directory for channel digest
 
