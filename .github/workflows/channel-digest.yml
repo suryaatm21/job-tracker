@@ -1,8 +1,8 @@
-name: Channel digest (4h)
+name: Channel digest (2h)
 
 on:
   schedule:
-    - cron: '0 */4 * * *'
+    - cron: '0 */2 * * *'
   workflow_dispatch:
     inputs:
       command:
@@ -18,7 +18,7 @@ on:
       count:
         description: 'Max items to include (digest) or N for recent'
         required: false
-        default: '50'
+        default: '100'
       force_window_hours:
         description: 'Override WINDOW_HOURS for testing (e.g., 720 for 30 days)'
         required: false
