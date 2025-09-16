@@ -24,6 +24,28 @@ This implementation adds a time-boxed "seen with TTL" memory system to the job-a
 3. "company_name:title" (fallback)
 ```
 
+### 4. Actions Cache Strategy (Updated)
+
+- Keys use a per-run pattern with a weekly prefix to allow mid-week state updates:
+  - `dm-watcher-state-v1-<ISO_WEEK>-<run_id>`
+  - `channel-digest-state-v1-<ISO_WEEK>-<run_id>`
+  - `channel-digest-testing-state-v1-<ISO_WEEK>-<run_id>`
+- Restore prefers the latest cache for the current week via `restore-keys` and falls back to prior weeks.
+- Save runs every execution and creates a new immutable cache entry.
+- A scheduled cleanup workflow prunes caches:
+  - Deletes non-matching prefixes
+  - Keeps the newest N per managed prefix (default 3)
+
+### 5. When We Mark Items as Seen (Updated)
+
+- We mark items as seen only after a successful Telegram send (both DM and digest).
+- If a send fails, we do not mark items as seen so they can retry on subsequent runs.
+
+### 6. Source Tagging
+
+- Channel digest lines include a source tag for non-Simplify owners (e.g., `(vanshb03)`).
+- DM alerts do not include source tags.
+
 ## Files Modified
 
 ### New Files

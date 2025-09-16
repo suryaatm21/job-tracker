@@ -110,3 +110,34 @@ git push
 1. Message @userinfobot on Telegram
 2. It will reply with your user ID
 3. Use this number as your `TELEGRAM_CHAT_ID`
+## Duplicate messages on consecutive digest runs
+
+Symptoms:
+- Second digest run sends the same items as the first.
+
+Causes and fixes:
+- Using the tuple returned by `should_alert_item` as a boolean will always evaluate truthy.
+  - Fix: unpack the tuple: `flag, reason = should_alert_item(...); if flag:`
+- Items were marked seen before ensuring send success.
+  - Fix: mark as seen only after Telegram send returns success.
+
+## Cache cleanup removed too many caches
+
+Symptoms:
+- After scheduled cleanup, unrelated caches are gone; builds rebuild dependencies.
+
+Causes and fixes:
+- Scheduled run lacked `workflow_dispatch` inputs; empty `KEEP_PREFIXES` matched everything.
+  - Fix: provide defaults in job env and guard against empty `KEEP_PREFIXES`.
+
+## Cache count higher than KEEP_N after cleanup
+
+Symptoms:
+- You see 4 caches for a prefix when KEEP_N=3.
+
+Likely cause:
+- A writer workflow (e.g., DM watcher) created a new cache during cleanup execution.
+
+Mitigations:
+- Add a shared `concurrency` group across state-touching workflows.
+- Run cleanup during a quiet window or re-run cleanup immediately.

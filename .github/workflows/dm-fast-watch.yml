@@ -37,12 +37,12 @@ permissions:
 
 env:
   TARGET_REPOS: '["SimplifyJobs/Summer2026-Internships","vanshb03/Summer2026-Internships"]'
-  WATCH_PATHS: '["listings.json"]'
+  WATCH_PATHS: '["listings.json", ".github/scripts/listings.json"]'
   LISTINGS_PATH: '.github/scripts/listings.json'
   DATE_FIELD: 'date_posted'
   DATE_FALLBACK: 'date_updated'
   WINDOW_HOURS: '24'
-  SEEN_TTL_DAYS: '14' # DM alerts: shorter TTL for frequent updates
+  SEEN_TTL_DAYS: '7' # DM alerts: shorter TTL for frequent updates
   STATE_DIR: '.state/dm-watcher' # Separate state directory for DM watcher
 
 jobs:
