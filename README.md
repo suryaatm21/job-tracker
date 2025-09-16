@@ -20,6 +20,15 @@ A Telegram bot that monitors multiple GitHub repositories for new internship lis
 - **Message batching**: Automatically splits long messages to handle Telegram's 4096 character limit.
 - **Robust file fetching**: Multi-strategy fallback for GitHub Contents API with truncation handling.
 
+## Time Window (What It Actually Means)
+
+- **Definition**: The time window filters listings by their own timestamps (`date_posted` → fallback `date_updated`).
+- **Not commits**: We do not look for commits “within the window.” Commits are used only to detect changes; the window then filters which new/updated listings are recent enough to send.
+- **Where it’s used**:
+  - `dm-fast-watch.yml` (`watch_repo.py`): Detects new entries per commit since last seen SHA, then keeps only items with timestamps within `WINDOW_HOURS`.
+  - `channel-digest*.yml` (`send_digest_multi.py`): Scans current listings across repos and filters to those within `WINDOW_HOURS`.
+- **Typical values**: DMs use 24h by default; channel digest uses 2–8h. You can override during manual runs with the `force_window_hours` input.
+
 ## Requirements
 
 - **Telegram Bot API token** from [@BotFather](https://t.me/BotFather).
@@ -40,7 +49,22 @@ Environment variables in workflows:
 
 - `TARGET_REPOS` – JSON array of repositories: `["owner1/repo1", "owner2/repo2"]`
 - `WINDOW_HOURS` – Time window for filtering (24 for DMs, 4-8 for digests)
-- `SEEN_TTL_DAYS` – How long to remember alerted jobs (7 for DMs, 14 for digests)
+- `SEEN_TTL_DAYS` – How long to remember alerted jobs (default 14; tune per workflow)
+
+### State & Caching (Immutable Actions Cache)
+
+- **State files**: Each workflow writes its own state under `.state/<workflow>`
+  - DM watcher: `.state/dm-watcher`
+  - Channel digest: `.state/channel-digest`
+  - Channel digest testing: `.state/channel-digest-testing`
+- **Why weekly keys**: GitHub Actions caches are immutable. To persist evolving state mid‑week, we use per‑run keys with a weekly prefix and rely on `restore-keys` to load the latest one.
+- **Key format**:
+  - `dm-watcher-state-v1-<ISO_WEEK>-<run_id>`
+  - `channel-digest-state-v1-<ISO_WEEK>-<run_id>`
+  - `channel-digest-testing-state-v1-<ISO_WEEK>-<run_id>`
+- **Restore strategy**: Prefer the newest cache for the current ISO week, then fall back to earlier weeks via `restore-keys`.
+- **Save strategy**: Always save a new cache at the end of a run (immutable), then prune old caches with a cleanup workflow (below).
+- For TTL details, see `docs/TTL_IMPLEMENTATION.md`.
 
 ## Workflows
 
@@ -61,6 +85,18 @@ Environment variables in workflows:
 - **Schedule**: Every hour
 - **Purpose**: Isolated testing of channel digest logic
 - **Features**: Same as `channel-digest.yml` but designed for testing and validation
+
+### Cache Cleanup (`.github/workflows/cache-cleanup.yml`)
+
+- **Schedule**: Daily at 08:00 UTC; also supports manual runs (`workflow_dispatch`).
+- **Purpose**: Prune immutable caches to keep only the newest N per managed prefix and delete non‑matching caches.
+- **Defaults**:
+  - Keep prefixes: `dm-watcher-state-v1, channel-digest-state-v1, channel-digest-testing-state-v1`
+  - Keep N per prefix: `3`
+- **Manual inputs**:
+  - `dry_run` (true/false): list without deleting
+  - `keep_prefixes`: comma‑separated list to keep
+  - `keep_n_per_prefix`: how many newest to retain
 
 ## Architecture
 
@@ -127,6 +163,14 @@ Environment variables in workflows:
 - Verify `WINDOW_HOURS` allows recent items (timestamps in UTC)
 - TTL cache may be suppressing recently alerted items
 - Use manual runs with `FORCE_WINDOW_HOURS=720` for testing
+
+**DM watcher runs but no Telegram DMs**
+
+- The DM watcher only alerts on true additions in commits since the last seen SHA; edits without additions will be ignored. The channel digest can still show items because it scans the current listings snapshot, not just commit additions.
+- SimplifyJobs category filter is stricter for DMs (`Software Engineering`, `Data Science, AI & Machine Learning` only). The digest allows more categories, so it may include items the DM filter suppresses.
+- TTL suppression is per workflow. If the DM already alerted on an item within `SEEN_TTL_DAYS`, it won’t repeat, even if the channel digest sends it (separate TTL state).
+- Validate credentials: the job checks env presence, but if the user blocked the bot or the Chat ID is wrong, you’ll see `[TELEGRAM] Send failed` in logs.
+- For testing: trigger `dm-fast-watch.yml` with `reset_last_seen=true` or `back_one=true`, and/or set `force_window_hours=720` to verify end‑to‑end messaging.
 
 **Cache conflicts between workflows**
 

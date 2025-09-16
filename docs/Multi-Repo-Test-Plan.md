@@ -142,6 +142,30 @@ python .github/scripts/send_digest_multi.py
 3. ✅ Manual commands work and send messages to correct Telegram destinations
 4. ✅ Logs show multi-repo processing and deduplication
 5. ✅ State management works via Actions cache
+
+## 2025-09 Updates: Cache + TTL Behavior
+
+- Per-run cache keys with weekly prefixes for mutability:
+  - `dm-watcher-state-v1-<ISO_WEEK>-<run_id>`
+  - `channel-digest(-testing)-state-v1-<ISO_WEEK>-<run_id>`
+- Restore prefers the current week via `restore-keys`; Save creates a new entry each run.
+- Weekly scheduled cleanup keeps the newest N (default 3) per managed prefix and removes others; non-matching prefixes are pruned too.
+- Items are marked seen only after successful Telegram send; failures do not mark items, to allow retries.
+- Channel digest adds source tags for non-Simplify owners; DM does not.
+
+### Validation Steps
+
+- Duplicate suppression between runs:
+  1. Run `channel-digest-testing.yml` with `force_window_hours=720` and small `count`.
+  2. Re-run immediately. Expect 2nd run to suppress previously sent items.
+
+- Cache mutation within a week:
+  1. Confirm first run restores from latest weekly prefix and saves `…-<run_id_1>`.
+  2. Second run restores from `…-<run_id_1>` and saves `…-<run_id_2>`.
+
+- Cleanup safety:
+  1. Dry run `cache-cleanup.yml` and verify prefixes.
+  2. Live run; check that only N newest per prefix remain.
 6. ✅ Existing single-repo manual commands remain functional
 7. ✅ No duplicate listings in output even if present in both source repos
 
