@@ -164,16 +164,20 @@ def normalize_url(url):
     if not url:
         return None
     try:
-        parsed = urlparse(url)
+        parsed = urlparse(url.strip().lower())
         # Keep scheme, netloc (host), and path; drop query and fragment
         return f"{parsed.scheme}://{parsed.netloc}{parsed.path}".rstrip('/')
     except Exception:
         return url
 
+def get_primary_url(item):
+    """Prefer item['url'] and fallback to item['application_link']"""
+    return (item.get("url") or item.get("application_link") or "").strip()
+
 def get_dedup_key(item):
     """Get deduplication key: normalized_url -> id -> (company.lower(), title.lower())"""
     # Prioritize URL over ID since IDs conflict between repos but URLs are more reliable
-    norm_url = normalize_url(item.get("url"))
+    norm_url = normalize_url(get_primary_url(item))
     if norm_url:
         return ("url", norm_url)
     
@@ -246,7 +250,8 @@ def process_repo_entries(repo, listings_path, last_seen_sha, seen=None, ttl_seco
         debug_log(f"[DELTA] {repo} → commit={sha[:8]}, parent={parent[:8] if parent else 'None'}")
         
         files = [f["filename"] for f in commit_detail(repo, sha).get("files", [])]
-        watched_files = [f for f in files if watched(f)]
+        # Only react if the detected listings_path changed in this commit
+        watched_files = [f for f in files if f == listings_path]
         
         if not watched_files:
             debug_log(f"[DELTA] {repo} → commit {sha[:8]} has no watched files (files: {files[:3]}...)")
@@ -299,7 +304,7 @@ def process_repo_entries(repo, listings_path, last_seen_sha, seen=None, ttl_seco
                         if should_alert:
                             title = item.get("title", "")
                             company = item.get("company_name", "")
-                            url = item.get("url", "")
+                            url = get_primary_url(item)
                             season = get_unified_season(item)  # Use unified season handling
                             
                             # Format location with DM mode (CA/NY/NJ resolution)
