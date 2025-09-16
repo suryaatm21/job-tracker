@@ -250,8 +250,8 @@ def process_repo_entries(repo, listings_path, last_seen_sha, seen=None, ttl_seco
         debug_log(f"[DELTA] {repo} → commit={sha[:8]}, parent={parent[:8] if parent else 'None'}")
         
         files = [f["filename"] for f in commit_detail(repo, sha).get("files", [])]
-        # Only react if the detected listings_path changed in this commit
-        watched_files = [f for f in files if f == listings_path]
+        # Only react if any watched path changed in this commit
+        watched_files = [f for f in files if watched(f)]
         
         if not watched_files:
             debug_log(f"[DELTA] {repo} → commit {sha[:8]} has no watched files (files: {files[:3]}...)")
