@@ -109,16 +109,20 @@ def normalize_url(url):
     if not url:
         return None
     try:
-        parsed = urlparse(url)
+        parsed = urlparse(url.strip().lower())
         # Keep scheme, netloc (host), and path; drop query and fragment
         return f"{parsed.scheme}://{parsed.netloc}{parsed.path}".rstrip('/')
     except Exception:
         return url
 
+def get_primary_url(item):
+    """Prefer item['url'] and fallback to item['application_link']"""
+    return (item.get("url") or item.get("application_link") or "").strip()
+
 def get_dedup_key(item):
     """Get deduplication key: normalized_url -> id -> (company.lower(), title.lower())"""
     # Prioritize URL over ID since IDs conflict between repos but URLs are more reliable
-    norm_url = normalize_url(item.get("url"))
+    norm_url = normalize_url(get_primary_url(item))
     if norm_url:
         return ("url", norm_url)
     
@@ -259,7 +263,7 @@ def main():
                         if dedup_key:
                             company = item.get("company_name", "").strip()
                             title = item.get("title", "").strip()
-                            url = item.get("url", "").strip()
+                            url = get_primary_url(item)
                             season = get_unified_season(item)  # Use unified season handling
                             
                             # Format location with digest mode (always "Multi-location" if multiple)

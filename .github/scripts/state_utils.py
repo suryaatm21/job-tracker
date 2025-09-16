@@ -11,6 +11,10 @@ import time
 from datetime import datetime, timezone
 from urllib.parse import urlparse
 
+def get_primary_url(item):
+    """Return the canonical URL for a listing (url or application_link)."""
+    return (item.get("url") or item.get("application_link") or "").strip()
+
 def normalize_url(url):
     """Normalize URL to scheme+host+path for consistent caching"""
     if not url or not url.strip():
@@ -26,7 +30,7 @@ def normalize_url(url):
 def get_cache_key(item):
     """Get consistent cache key: normalized_url -> id -> (company.lower(), title.lower())"""
     # Priority 1: Normalized URL (most reliable)
-    norm_url = normalize_url(item.get("url"))
+    norm_url = normalize_url(get_primary_url(item))
     if norm_url:
         return norm_url
     
@@ -67,7 +71,7 @@ def should_include_item(item):
         return False
     
     # Skip items with empty/invalid URLs for better quality
-    url = item.get("url", "").strip()
+    url = get_primary_url(item)
     return bool(url)
 
 def load_seen(path=".state/seen.json"):
