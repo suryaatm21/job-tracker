@@ -78,7 +78,7 @@ jobs:
           DATE_FALLBACK: ${{ env.DATE_FALLBACK }}
           WINDOW_HOURS: ${{ github.event.inputs.force_window_hours || env.WINDOW_HOURS }}
           SEEN_TTL_DAYS: ${{ env.SEEN_TTL_DAYS }}
-          COUNT: ${{ github.event.inputs.count }}
+          COUNT: ${{ github.event.inputs.count || '50' }}
           STATE_DIR: ${{ env.STATE_DIR }}
         run: python .github/scripts/send_digest_multi.py
 
