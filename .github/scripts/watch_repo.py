@@ -342,37 +342,8 @@ def main():
     ttl_seconds = SEEN_TTL_DAYS * 24 * 3600
     now_epoch = int(time.time())
     
-    # If cache is empty (first run or after reset), pre-populate with recent jobs
-    # to avoid alerting on old listings
-    if not seen:
-        debug_log("TTL cache is empty, pre-populating with recent jobs to avoid old alerts")
-        for repo in TARGET_REPOS:
-            try:
-                default_branch = get_default_branch(repo)
-                listings_path = detect_listings_path(repo, default_branch)
-                listings = fetch_file_json(repo, listings_path, default_branch)
-                
-                # Pre-populate cache with jobs from last 7 days
-                cutoff = now_epoch - (7 * 24 * 3600)  # 7 days ago
-                # Use a timestamp from 30 days ago to mark as "old seen" instead of now
-                old_seen_timestamp = now_epoch - (30 * 24 * 3600)  # 30 days ago
-                
-                for item in listings[:100]:  # Limit to avoid processing too many
-                    if should_include_item(item):
-                        ts_val = item.get(DATE_FIELD, item.get(DATE_FALLBACK))
-                        ts = to_epoch(ts_val)
-                        if ts >= cutoff:  # Only cache recent items
-                            cache_key = get_cache_key(item)
-                            # Mark with old timestamp so TTL will allow re-alerting soon
-                            seen[cache_key] = old_seen_timestamp
-                            
-                debug_log(f"Pre-populated {len([k for k in seen.keys()])} recent items from {repo} with old timestamps")
-            except Exception as e:
-                debug_log(f"Failed to pre-populate cache from {repo}: {e}")
-        
-        if seen:
-            save_seen(seen, SEEN_TTL_DAYS, str(seen_cache_path))
-            debug_log(f"Saved pre-populated cache with {len(seen)} items")
+    # Load seen cache (no pre-population - let the watcher learn naturally)
+    # The commit-based approach will only alert on truly new additions
     
     all_entries = []
     
