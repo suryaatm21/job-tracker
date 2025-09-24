@@ -354,15 +354,19 @@ def main():
                 
                 # Pre-populate cache with jobs from last 7 days
                 cutoff = now_epoch - (7 * 24 * 3600)  # 7 days ago
+                # Use a timestamp from 30 days ago to mark as "old seen" instead of now
+                old_seen_timestamp = now_epoch - (30 * 24 * 3600)  # 30 days ago
+                
                 for item in listings[:100]:  # Limit to avoid processing too many
                     if should_include_item(item):
                         ts_val = item.get(DATE_FIELD, item.get(DATE_FALLBACK))
                         ts = to_epoch(ts_val)
                         if ts >= cutoff:  # Only cache recent items
                             cache_key = get_cache_key(item)
-                            seen[cache_key] = now_epoch
+                            # Mark with old timestamp so TTL will allow re-alerting soon
+                            seen[cache_key] = old_seen_timestamp
                             
-                debug_log(f"Pre-populated {len([k for k in seen.keys()])} recent items from {repo}")
+                debug_log(f"Pre-populated {len([k for k in seen.keys()])} recent items from {repo} with old timestamps")
             except Exception as e:
                 debug_log(f"Failed to pre-populate cache from {repo}: {e}")
         
