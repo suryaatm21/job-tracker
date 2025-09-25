@@ -128,7 +128,7 @@ def send_telegram_batched(header, lines):
     
     try:
         # Use the batching utility from telegram_utils
-        success = batch_send_message(
+        success, results = batch_send_message(
             token=token,
             chat_id=chat_id,
             header=header,
@@ -140,7 +140,7 @@ def send_telegram_batched(header, lines):
             debug_log(f"[TELEGRAM] Successfully sent digest with {len(lines)} items")
             return True
         else:
-            debug_log("[TELEGRAM] Failed to send digest")
+            debug_log(f"[TELEGRAM] Failed to send digest - some batches failed: {results}")
             return False
             
     except Exception as e:
