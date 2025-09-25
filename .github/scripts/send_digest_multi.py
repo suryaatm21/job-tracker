@@ -62,8 +62,17 @@ def get_listings(repo, path, ref=None):
 
 
 def should_include_listing(item):
-    """Filter items using shared quality gate (active, visible, URL validity)"""
-    return should_include_item(item)
+    """Filter items using shared quality gate plus digest-specific requirements"""
+    # First apply shared quality gate (active, visible, URL presence)
+    if not should_include_item(item):
+        return False
+    
+    # Digest-specific requirements to prevent blank formatting
+    # Require both title and company_name for proper digest display
+    title = (item.get("title") or "").strip()
+    company = (item.get("company_name") or "").strip()
+    
+    return bool(title) and bool(company)
 
 
 def parse_dt(s):
