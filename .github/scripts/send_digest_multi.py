@@ -21,7 +21,7 @@ from datetime import datetime, timezone, timedelta
 
 # Utility imports
 from github_helper import fetch_file_json, debug_log
-from state_utils import load_seen, save_seen, should_alert_item, get_cache_key, format_epoch_for_log
+from state_utils import load_seen, save_seen, should_alert_item, get_cache_key, format_epoch_for_log, should_include_item
 from format_utils import format_location, log_location_resolution, format_job_line
 from telegram_utils import batch_send_message
 from repo_utils import get_default_branch, detect_listings_path
@@ -62,8 +62,8 @@ def get_listings(repo, path, ref=None):
 
 
 def should_include_listing(item):
-    """Filter items by various criteria (existence of basic fields, etc.)"""
-    return bool(item.get("title") and item.get("company_name"))
+    """Filter items using shared quality gate (active, visible, URL validity)"""
+    return should_include_item(item)
 
 
 def parse_dt(s):
