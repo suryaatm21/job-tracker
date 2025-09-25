@@ -67,9 +67,26 @@ def should_include_listing(item):
 
 
 def parse_dt(s):
-    """Parse datetime string with fallback formats"""
+    """Parse datetime with support for Unix epochs and various string formats"""
     if not s:
         return None
+    
+    # First try to handle Unix epoch timestamps (int, float, or string digits)
+    try:
+        # Convert to string first, then try to parse as numeric
+        s_str = str(s).strip()
+        
+        # Check if it's all digits (possibly with decimal point for float)
+        if s_str.replace('.', '').isdigit():
+            timestamp = float(s_str)
+            # Reasonable epoch range check (1990 to 2040)
+            if 631152000 <= timestamp <= 2208988800:  # Jan 1 1990 to Jan 1 2040
+                return datetime.fromtimestamp(timestamp, tz=timezone.utc)
+    except (ValueError, OSError, OverflowError):
+        pass
+    
+    # Convert to string for string-based parsing
+    s = str(s).strip()
     
     # Try most common format first: 2024-12-19 (ISO date only)
     try:
