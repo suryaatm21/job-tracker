@@ -47,7 +47,17 @@ def fetch_file_content(repo, path, ref=None):
     
     # Strategy 1: Contents API with base64 decoding
     try:
-        params = {"ref": f"heads/{ref}"} if ref else {}
+        # Detect if ref is a commit SHA (40-character hex string) vs branch name
+        if ref:
+            # If ref looks like a commit SHA (40-char hex), use it directly
+            if len(ref) == 40 and all(c in '0123456789abcdef' for c in ref.lower()):
+                params = {"ref": ref}
+            else:
+                # Assume it's a branch name and add heads/ prefix
+                params = {"ref": f"heads/{ref}"}
+        else:
+            params = {}
+        
         data = gh_get(f"{GH}/repos/{repo}/contents/{path}", **params)
         
         if isinstance(data, dict):

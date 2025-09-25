@@ -17,7 +17,18 @@ def get_default_branch(repo):
 
 def detect_listings_path(repo, branch, fallback_path=".github/scripts/listings.json"):
     """Auto-detect listings.json path within repo"""
-    for path in [".github/scripts/listings.json", "listings.json"]:
+    # First check the configured/fallback path if it's not one of the defaults
+    paths_to_try = [".github/scripts/listings.json", "listings.json"]
+    
+    # If fallback_path is not in the default list, try it first
+    if fallback_path not in paths_to_try:
+        paths_to_try.insert(0, fallback_path)
+    # If fallback_path is in the list, make sure it's tried first
+    elif fallback_path in paths_to_try:
+        paths_to_try.remove(fallback_path)
+        paths_to_try.insert(0, fallback_path)
+    
+    for path in paths_to_try:
         try:
             gh_get(f"{GH}/repos/{repo}/contents/{path}", ref=branch)
             debug_log(f"[PATH] {repo} found listings at: {path}")
@@ -25,6 +36,7 @@ def detect_listings_path(repo, branch, fallback_path=".github/scripts/listings.j
         except Exception as e:
             if "404" not in str(e):
                 debug_log(f"[PATH] {repo} error checking {path}: {e}")
+    
     debug_log(f"[PATH] {repo} using fallback path: {fallback_path}")
     return fallback_path  # fallback
 

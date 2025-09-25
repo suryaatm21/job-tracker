@@ -161,7 +161,7 @@ def main():
         try:
             # Get repository info
             branch = get_default_branch(repo)
-            listings_path = detect_listings_path(repo, branch)
+            listings_path = detect_listings_path(repo, branch, LISTINGS_PATH)  # Pass LISTINGS_PATH as fallback
             
             # Fetch listings
             listings = get_listings(repo, listings_path)
@@ -263,9 +263,9 @@ def main():
     if success:
         # Update seen cache only after successful send
         for item in final_items:
-            key = get_dedup_key(item)
-            if key:
-                seen[key] = now_epoch
+            cache_key = get_cache_key(item)  # Use cache key, not dedup key
+            if cache_key:
+                seen[cache_key] = now_epoch
         
         # Save updated seen cache
         save_seen(seen, SEEN_TTL_DAYS, str(seen_cache_path))
