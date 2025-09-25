@@ -133,7 +133,8 @@ def send_telegram_batched(header, lines):
             chat_id=chat_id,
             header=header,
             lines=lines,
-            max_chars=3900  # Leave room for headers
+            max_chars=3900,  # Leave room for headers
+            parse_mode="HTML"  # Enable HTML formatting for bold text
         )
         
         if success:
@@ -269,7 +270,9 @@ def main():
         if locations and len(locations) > 1:
             log_location_resolution(company, title, locations, location, "channel")
         
-        line = format_job_line(company, title, season, location, url, html=True)
+        # Extract source repo name for display (e.g., "SimplifyJobs" or "vanshb03")
+        source = item.get("_repo", "").split("/")[0] if item.get("_repo") else None
+        line = format_job_line(company, title, season, location, url, html=True, source=source)
         lines.append(line)
     
     # Prepare header
