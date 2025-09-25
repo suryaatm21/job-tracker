@@ -45,6 +45,13 @@ if FORCE_WINDOW_HOURS and FORCE_WINDOW_HOURS.replace('.', '').isdigit():
 # TTL configuration for seen cache
 SEEN_TTL_DAYS = int(os.environ.get("SEEN_TTL_DAYS", "14"))
 
+# Telegram message limits
+MAX_TELEGRAM_MESSAGE_CHARS = 3900  # Leave room for headers in batch messages
+
+# Unix epoch timestamp validation range (to prevent invalid date parsing)
+EPOCH_MIN_TIMESTAMP = 631152000   # Jan 1, 1990 00:00:00 UTC
+EPOCH_MAX_TIMESTAMP = 2208988800  # Jan 1, 2040 00:00:00 UTC
+
 # State directory (configurable for cache separation)
 STATE_DIR = pathlib.Path(os.environ.get("STATE_DIR", ".state"))
 STATE_DIR.mkdir(exist_ok=True, parents=True)
@@ -88,8 +95,8 @@ def parse_dt(s):
         # Check if it's all digits (possibly with decimal point for float)
         if s_str.replace('.', '').isdigit():
             timestamp = float(s_str)
-            # Reasonable epoch range check (1990 to 2040)
-            if 631152000 <= timestamp <= 2208988800:  # Jan 1 1990 to Jan 1 2040
+            # Reasonable epoch range check to prevent invalid date parsing
+            if EPOCH_MIN_TIMESTAMP <= timestamp <= EPOCH_MAX_TIMESTAMP:
                 return datetime.fromtimestamp(timestamp, tz=timezone.utc)
     except (ValueError, OSError, OverflowError):
         pass
@@ -149,7 +156,7 @@ def send_telegram_batched(header, lines):
             chat_id=chat_id,
             header=header,
             lines=lines,
-            max_chars=3900,  # Leave room for headers
+            max_chars=MAX_TELEGRAM_MESSAGE_CHARS,
             parse_mode="HTML"  # Enable HTML formatting for bold text
         )
         
