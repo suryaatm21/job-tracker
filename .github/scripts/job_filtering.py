@@ -59,14 +59,19 @@ def should_process_repo_item(item, repo):
     """
     Check if item should be processed based on repository-specific rules.
     For SimplifyJobs: strict category filtering
-    For other repos: include all items
+    For other repos: include all items (but still run quality checks)
     """
+    # Always run quality gate first (active filtering, visibility, URL checks)
+    if not should_include_item(item):
+        return False, "quality"
+    
+    # Apply repo-specific filtering
     if "SimplifyJobs" in repo:
         category = classify_job_category(item)
         if not category:
-            return False, "Category filtered"
+            return False, "category"
     
-    return True, "Allowed"
+    return True, "allowed"
 
 
 def is_allowed_category_digest(item):

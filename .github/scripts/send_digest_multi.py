@@ -232,6 +232,8 @@ def main():
     
     if not final_items:
         debug_log("[INFO] No items to send in digest")
+        # Still save seen cache to prune stale entries on quiet runs
+        save_seen(seen, SEEN_TTL_DAYS, str(seen_cache_path))
         return
     
     # Format items for display
