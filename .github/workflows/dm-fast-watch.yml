@@ -86,7 +86,7 @@ jobs:
           TARGET_REPO: 'vanshb03/Summer2026-Internships'
           LISTINGS_PATH: ${{ env.LISTINGS_PATH }}
           MESSAGE_PREFIX: '🔔 DM Alert'
-        run: python .github/scripts/send_latest_listing.py
+        run: python .github/scripts/manual/send_latest_listing.py
 
       - name: run today
         if: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.command == 'today' }}
@@ -97,7 +97,7 @@ jobs:
           TARGET_REPO: 'vanshb03/Summer2026-Internships'
           LISTINGS_PATH: ${{ env.LISTINGS_PATH }}
           MESSAGE_PREFIX: '🔔 DM Alert'
-        run: python .github/scripts/send_todays_listings.py
+        run: python .github/scripts/manual/send_todays_listings.py
 
       - name: run recent
         if: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.command == 'recent' }}
@@ -109,7 +109,7 @@ jobs:
           LISTINGS_PATH: ${{ env.LISTINGS_PATH }}
           COUNT: ${{ github.event.inputs.count }}
           MESSAGE_PREFIX: '🔔 DM Alert'
-        run: python .github/scripts/send_recent_listings.py
+        run: python .github/scripts/manual/send_recent_listings.py
 
       # Scheduled watcher → DM (only when true additions within WINDOW_HOURS)
       - name: watcher (schedule + manual)

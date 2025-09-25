@@ -65,9 +65,13 @@ def parse_epoch(value):
         return None
 
 def should_include_item(item):
-    """Filter items based on visibility and URL presence"""
+    """Filter items based on visibility, active status, and URL presence"""
     # Skip items marked as not visible
     if item.get("is_visible") is False:
+        return False
+    
+    # Skip items marked as inactive/closed (active: false)
+    if item.get("active") is False:
         return False
     
     # Skip items with empty/invalid URLs for better quality

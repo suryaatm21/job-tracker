@@ -15,7 +15,7 @@ A Telegram bot that monitors multiple GitHub repositories for new internship lis
 - **TTL-based memory**: Remembers previously alerted jobs with configurable TTL to handle reopened positions.
 - **Dual notification modes**:
   - **DM alerts** (every 5 minutes): Immediate notifications for new listings within 24 hours.
-  - **Channel digest** (every 4 hours): Batched summaries with HTML formatting for channels.
+  - **Channel digest** (every 2 hours): Batched summaries with HTML formatting for channels.
 - **Intelligent location formatting**: Context-aware location resolution (CA/NY/NJ for DMs, Multi-location for digests).
 - **Message batching**: Automatically splits long messages to handle Telegram's 4096 character limit.
 - **Robust file fetching**: Multi-strategy fallback for GitHub Contents API with truncation handling.

@@ -1,13 +1,31 @@
-import os, json, requests, pathlib, base64, time
+#!/usr/bin/env python3
+"""
+Multi-repo watcher: Monitor repositories for new job listings and send DM alerts.
+
+This module orchestrates the job watching workflow using modular utilities:
+- repo_utils: Repository and branch management  
+- job_filtering: Category and quality filtering
+- dedup_utils: Cross-repo deduplication
+- watcher_core: Commit processing and diff analysis
+- format_utils: Location and message formatting
+- state_utils: TTL-based seen cache management
+- telegram_utils: Message sending
+"""
+import os, json, pathlib, time
 from datetime import datetime
-from urllib.parse import urlparse
-from github_helper import fetch_file_content, fetch_file_json, debug_log, gh_get, GH
+
+# Import all utility modules
+from github_helper import debug_log
 from state_utils import (
     load_seen, save_seen, should_alert_item, 
     get_cache_key, format_epoch_for_log, should_include_item
 )
 from format_utils import format_location, log_location_resolution, format_job_line
 from telegram_utils import send_message
+from repo_utils import get_default_branch, detect_listings_path, get_repo_entries
+from dedup_utils import get_dedup_key, get_primary_url, get_unified_season
+from job_filtering import should_process_repo_item
+from watcher_core import process_repo_entries
 
 # Multi-repo configuration
 TARGET_REPOS = json.loads(os.environ.get("TARGET_REPOS", '["vanshb03/Summer2026-Internships"]'))
@@ -31,12 +49,6 @@ if FORCE_WINDOW_HOURS and FORCE_WINDOW_HOURS.replace('.', '').isdigit():
 RESET_LAST_SEEN = os.getenv("RESET_LAST_SEEN", "false").lower() == "true"
 BACK_ONE = os.getenv("BACK_ONE", "false").lower() == "true"
 
-# Category filtering: Only allow these categories from SimplifyJobs repo
-ALLOWED_CATEGORIES = {
-    "Software Engineering", 
-    "Data Science, AI & Machine Learning"
-}
-
 if RESET_LAST_SEEN:
     debug_log(f"[CONFIG] RESET_LAST_SEEN=true - will ignore cached last_seen SHAs")
 if BACK_ONE:
@@ -49,102 +61,8 @@ SEEN_TTL_DAYS = int(os.getenv("SEEN_TTL_DAYS", "14"))
 STATE_DIR = pathlib.Path(os.getenv("STATE_DIR", ".state"))
 STATE_DIR.mkdir(exist_ok=True, parents=True)
 
-def get_default_branch(repo):
-    """Get default branch for a repository"""
-    repo_info = gh_get(f"{GH}/repos/{repo}")
-    branch = repo_info["default_branch"]
-    debug_log(f"[BRANCH] {repo} default branch: {branch}")
-    return branch
-
-def detect_listings_path(repo, branch):
-    """Auto-detect listings.json path within repo"""
-    for path in [".github/scripts/listings.json", "listings.json"]:
-        try:
-            gh_get(f"{GH}/repos/{repo}/contents/{path}", ref=branch)
-            debug_log(f"[PATH] {repo} found listings at: {path}")
-            return path
-        except requests.HTTPError as e:
-            if e.response.status_code != 404:
-                raise
-    debug_log(f"[PATH] {repo} using fallback path: {LISTINGS_PATH}")
-    return LISTINGS_PATH  # fallback
-
-def get_repo_entries(repo, per_page=100):
-    """Fetch commits for a repository"""
-    return gh_get(f"{GH}/repos/{repo}/commits", per_page=per_page)
-
-def commit_detail(repo, sha):
-    return gh_get(f"{GH}/repos/{repo}/commits/{sha}")
-
-def get_file_at(repo, ref, path):
-    """Fetch file content at specific git reference using robust helper"""
-    try:
-        content = fetch_file_content(repo, path, ref)
-        debug_log(f"[FILE] {repo}:{path}@{ref[:8] if ref else 'HEAD'} → {len(content)} bytes")
-        return content
-    except Exception as e:
-        # file might not exist in older commit
-        if "404" in str(e):
-            debug_log(f"[FILE] {repo}:{path}@{ref[:8] if ref else 'HEAD'} → not found (404)")
-            return None
-        debug_log(f"[FILE] {repo}:{path}@{ref[:8] if ref else 'HEAD'} → error: {e}")
-        raise
-
-def watched(path):
-    return any(path == p or path.startswith(p) for p in WATCH_PATHS)
-
-def classify_job_category(job):
-    """
-    Classify job category based on title and existing category field.
-    Returns category string or None if job should be filtered out.
-    """
-    # First check if there's an existing category field (SimplifyJobs has this)
-    if "category" in job and job["category"]:
-        category = job["category"].strip()
-        if category in ALLOWED_CATEGORIES:
-            return category
-        # If existing category is not in allowed list, filter out
-        return None
-    
-    # Fallback: classify by title if no category exists
-    title = job.get("title", "").lower()
-    
-    # Data Science & AI & Machine Learning (first priority for overlapping terms)
-    if any(term in title for term in ["data science", "artificial intelligence", "data scientist", "ai &", "machine learning", "ml", "data analytics", "data analyst", "research eng", "nlp", "computer vision", "research sci", "data eng"]):
-        return "Data Science, AI & Machine Learning"
-    
-    # Software Engineering (second priority)
-    elif any(term in title for term in ["software", "software eng", "software dev", "product engineer", "fullstack", "full-stack", "full stack", "frontend", "front end", "front-end", "backend", "back end", "back-end", "founding engineer", "mobile dev", "mobile engineer", "forward deployed", "forward-deployed"]):
-        return "Software Engineering"
-    
-    # Filter out other categories (Hardware, Quant, Product, Other, etc.)
-    else:
-        return None
-
-def should_process_repo_item(item, repo):
-    """
-    Filter items based on:
-    1. Basic quality checks (visible, has URL)
-    2. Repo-specific filtering (only SimplifyJobs for category filtering)  
-    3. Category filtering for SimplifyJobs
-    """
-    # Basic quality checks
-    if not should_include_item(item):
-        return False, "quality"
-    
-    # Only apply category filtering to SimplifyJobs repo
-    if repo == "SimplifyJobs/Summer2026-Internships":
-        category = classify_job_category(item)
-        if category is None:
-            return False, "category"
-        # Store the category for later use
-        item["_classified_category"] = category
-        return True, "allowed"
-    
-    # Other repos: only basic quality checks
-    return True, "allowed"
-
 def send_telegram(text):
+    """Send message to Telegram with debug logging"""
     debug_log(f"[TELEGRAM] Sending message: {len(text)} chars, preview: {text[:100]}...")
     tok = os.getenv("TELEGRAM_BOT_TOKEN"); chat = os.getenv("TELEGRAM_CHAT_ID")
     if not tok or not chat: 
@@ -159,175 +77,33 @@ def send_telegram(text):
     
     return success
 
-def normalize_url(url):
-    """Normalize URL to scheme+host+path for deduplication"""
-    if not url:
-        return None
+def migrate_legacy_state():
+    """Migrate from single last_seen_sha.txt to per-repo state files"""
+    legacy_file = STATE_DIR / "last_seen_sha.txt"
+    if not legacy_file.exists():
+        return  # No legacy state to migrate
+    
     try:
-        parsed = urlparse(url.strip().lower())
-        # Keep scheme, netloc (host), and path; drop query and fragment
-        return f"{parsed.scheme}://{parsed.netloc}{parsed.path}".rstrip('/')
-    except Exception:
-        return url
-
-def get_primary_url(item):
-    """Prefer item['url'] and fallback to item['application_link']"""
-    return (item.get("url") or item.get("application_link") or "").strip()
-
-def get_dedup_key(item):
-    """Get deduplication key: normalized_url -> id -> (company.lower(), title.lower())"""
-    # Prioritize URL over ID since IDs conflict between repos but URLs are more reliable
-    norm_url = normalize_url(get_primary_url(item))
-    if norm_url:
-        return ("url", norm_url)
-    
-    # Only use ID if URL is not available (lower priority due to conflicts)
-    if item.get("id"):
-        return ("id", item["id"])
-    
-    # Final fallback to company+title combination
-    company = (item.get("company_name", "") or "").lower().strip()
-    title = (item.get("title", "") or "").lower().strip()
-    if company and title:
-        return ("company_title", (company, title))
-    
-    return None
-
-def get_unified_season(item):
-    """Get unified season label: season field or first term or empty string"""
-    # SimplifyJobs uses 'season' field, Vansh uses 'terms' array
-    if item.get("season"):
-        return item["season"]
-    elif item.get("terms") and len(item["terms"]) > 0:
-        return item["terms"][0]
-    else:
-        return ""
-
-def to_epoch(v):
-    try:
-        return int(v)
-    except Exception:
-        try:
-            from datetime import datetime as _dt
-            return int(_dt.fromisoformat(str(v)).timestamp())
-        except Exception:
-            return -1
-
-def process_repo_entries(repo, listings_path, last_seen_sha, seen=None, ttl_seconds=None, now_epoch=None):
-    """Get new entries from a single repository"""
-    debug_log(f"[WATCH] Processing repo: {repo}, last_seen={last_seen_sha[:8] if last_seen_sha else 'None'}")
-    
-    commits = get_repo_entries(repo, per_page=20)
-    if not commits:
-        debug_log(f"[WATCH] {repo} → No commits found")
-        return []
-    
-    newest_sha = commits[0]['sha'][:8]
-    debug_log(f"[COMMITS] {repo} newest={newest_sha}, considered_commits={len(commits)}")
-
-    # Collect unseen commits (newest→oldest until last_seen)
-    new = []
-    for c in commits:
-        if c["sha"] == last_seen_sha:
-            debug_log(f"[COMMITS] {repo} found last seen commit: {c['sha'][:8]}")
-            break
-        new.append(c)
-
-    if not new:
-        if last_seen_sha and commits and commits[0]["sha"] == last_seen_sha:
-            debug_log(f"[INFO] {repo} last_seen is already newest; likely no pushes since previous run")
-        else:
-            debug_log(f"[COMMITS] {repo} no new commits since last run")
-        return []
-    
-    debug_log(f"[WATCH] {repo} → Processing {len(new)} new commits")
-    
-    # Accumulate new entries from all commits
-    all_new_entries = []
-    for c in reversed(new):  # oldest→newest
-        sha = c["sha"]
-        parent = c["parents"][0]["sha"] if c["parents"] else None
-        debug_log(f"[DELTA] {repo} → commit={sha[:8]}, parent={parent[:8] if parent else 'None'}")
+        legacy_sha = legacy_file.read_text().strip()
+        if not legacy_sha:
+            return
         
-        files = [f["filename"] for f in commit_detail(repo, sha).get("files", [])]
-        # Only react if any watched path changed in this commit
-        watched_files = [f for f in files if watched(f)]
+        debug_log(f"[MIGRATE] Found legacy state: {legacy_sha[:8]}")
         
-        if not watched_files:
-            debug_log(f"[DELTA] {repo} → commit {sha[:8]} has no watched files (files: {files[:3]}...)")
-            continue
+        # Migrate to per-repo files for all configured repos
+        for repo in TARGET_REPOS:
+            safe_repo_name = repo.replace("/", "_")
+            repo_file = STATE_DIR / f"last_seen_{safe_repo_name}.txt"
+            if not repo_file.exists():
+                repo_file.write_text(legacy_sha)
+                debug_log(f"[MIGRATE] Created {repo_file.name} with {legacy_sha[:8]}")
         
-        debug_log(f"[DELTA] {repo} → commit {sha[:8]} changed watched files: {watched_files}")
+        # Remove legacy file after successful migration
+        legacy_file.unlink()
+        debug_log("[MIGRATE] Legacy state migration complete")
         
-        # Fetch listings file content at before/after refs
-        after_txt = get_file_at(repo, sha, listings_path)
-        before_txt = get_file_at(repo, parent, listings_path) if parent else None
-        
-        try:
-            after = json.loads(after_txt) if after_txt else []
-            before = json.loads(before_txt) if before_txt else []
-            debug_log(f"[DELTA] {repo} → commit {sha[:8]} parsed: before={len(before)}, after={len(after)}")
-        except Exception as e:
-            debug_log(f"[DELTA] {repo} → commit {sha[:8]} JSON parse failed: {e}")
-            continue
-        
-        # Find new entries in this commit
-        before_keys = {get_dedup_key(x) for x in before if get_dedup_key(x) and should_include_item(x)}
-        commit_new_count = 0
-        commit_window_count = 0
-        commit_category_count = 0
-        
-        for item in after:
-            key = get_dedup_key(item)
-            if key and key not in before_keys:
-                commit_new_count += 1
-                
-                # Apply time window filter first
-                ts_val = item.get(DATE_FIELD, item.get(DATE_FALLBACK))
-                ts = to_epoch(ts_val)
-                cutoff = time.time() - (WINDOW_HOURS * 3600.0)
-                
-                if ts >= cutoff:
-                    commit_window_count += 1
-                    
-                    # Apply repo-specific filtering (category filtering for SimplifyJobs)
-                    should_process, filter_reason = should_process_repo_item(item, repo)
-                    if should_process:
-                        commit_category_count += 1
-                        
-                        # Check TTL cache to see if we should alert for this item (if TTL enabled)
-                        should_alert = True
-                        if seen is not None and ttl_seconds is not None and now_epoch is not None:
-                            _flag, _reason = should_alert_item(item, seen, ttl_seconds, now_epoch)
-                            should_alert = _flag
-                        
-                        if should_alert:
-                            title = item.get("title", "")
-                            company = item.get("company_name", "")
-                            url = get_primary_url(item)
-                            season = get_unified_season(item)  # Use unified season handling
-                            
-                            # Format location with DM mode (CA/NY/NJ resolution)
-                            locations = item.get("locations", [])
-                            location = format_location(locations, mode="dm")
-                            
-                            # Log location resolution for debugging
-                            if locations and len(locations) > 1:
-                                log_location_resolution(company, title, locations, location, "dm")
-                            
-                            line = format_job_line(company, title, season, location, url, html=False)
-                            all_new_entries.append({
-                                "key": key,
-                                "line": line,
-                                "ts": ts,
-                                "repo": repo,
-                                "item": item
-                            })
-        
-        debug_log(f"[DELTA] {repo} → commit {sha[:8]} new_entries={commit_new_count}, after_window={commit_window_count}, after_category={commit_category_count}")
-    
-    debug_log(f"[WATCH] {repo} → total accumulated entries: {len(all_new_entries)}")
-    return all_new_entries
+    except Exception as e:
+        debug_log(f"[MIGRATE] Legacy state migration failed: {e}")
 
 def main():
     debug_log(f"[CONFIG] Starting multi-repo watch for: {TARGET_REPOS}")
@@ -336,14 +112,14 @@ def main():
     debug_log(f"[CONFIG] WINDOW_HOURS={WINDOW_HOURS}, SEEN_TTL_DAYS={SEEN_TTL_DAYS}")
     debug_log(f"[CONFIG] DATE_FIELD={DATE_FIELD}, DATE_FALLBACK={DATE_FALLBACK}")
     
+    # Migrate legacy state if needed
+    migrate_legacy_state()
+    
     # Load seen cache and calculate TTL (use STATE_DIR)
     seen_cache_path = STATE_DIR / "seen.json"
     seen = load_seen(str(seen_cache_path))
     ttl_seconds = SEEN_TTL_DAYS * 24 * 3600
     now_epoch = int(time.time())
-    
-    # Load seen cache (no pre-population - let the watcher learn naturally)
-    # The commit-based approach will only alert on truly new additions
     
     all_entries = []
     
@@ -361,6 +137,7 @@ def main():
         elif BACK_ONE and last_seen:
             # Set last_seen to parent of current last_seen to force re-check
             try:
+                from github_helper import gh_get, GH
                 commit_info = gh_get(f"{GH}/repos/{repo}/commits/{last_seen}")
                 if commit_info.get("parents"):
                     parent_sha = commit_info["parents"][0]["sha"]
@@ -376,10 +153,14 @@ def main():
         try:
             # Detect default branch and listings path
             default_branch = get_default_branch(repo)
-            listings_path = detect_listings_path(repo, default_branch)
+            listings_path = detect_listings_path(repo, default_branch, LISTINGS_PATH)
             
             # Get new entries from this repo with TTL filtering
-            repo_entries = process_repo_entries(repo, listings_path, last_seen, seen, ttl_seconds, now_epoch)
+            repo_entries = process_repo_entries(
+                repo, listings_path, last_seen, WATCH_PATHS,
+                WINDOW_HOURS, DATE_FIELD, DATE_FALLBACK,
+                seen, ttl_seconds, now_epoch
+            )
             all_entries.extend(repo_entries)
             
             # Update last seen SHA for this repo
@@ -415,34 +196,27 @@ def main():
     
     debug_log(f"[RESULT] After deduplication: {len(deduped_entries)} unique entries")
     
-    # Apply TTL-based filtering (using cache key from the original item when available)
+    # Apply TTL-based filtering (reuse should_alert_item for reopen logic)
     final_entries = []
     for entry in deduped_entries:
-        # Prefer cache key from the original item for consistency
-        cache_key = None
+        # Use the same TTL logic that watcher_core used, including reopen detection
         if entry.get("item"):
-            cache_key = get_cache_key(entry["item"])
-        if not cache_key:
-            # Fallback: derive from dedup key tuple
-            cache_key = entry["key"][1] if isinstance(entry["key"], tuple) else str(entry["key"])
-        
-        # Check TTL (simplified - assumes entry represents a valid item)
-        last_alert = seen.get(cache_key)
-        should_alert = True
-        reason = "new"
-        
-        if last_alert is not None:
-            if now_epoch - last_alert <= ttl_seconds:
-                should_alert = False
-                reason = "suppressed"
-                debug_log(f"SUPPRESS key={cache_key} last={format_epoch_for_log(last_alert)} ttl={SEEN_TTL_DAYS}d")
+            should_alert, reason = should_alert_item(entry["item"], seen, ttl_seconds, now_epoch)
+            if should_alert:
+                final_entries.append(entry)
+                if reason == "reopen":
+                    debug_log(f"ALLOW-REOPEN item updated, allowing despite TTL")
+                elif reason == "ttl_expired":
+                    cache_key = get_cache_key(entry["item"])
+                    last_alert = seen.get(cache_key)
+                    debug_log(f"ALLOW-TTL key={cache_key} last={format_epoch_for_log(last_alert)} ttl={SEEN_TTL_DAYS}d")
             else:
-                reason = "ttl_expired"
-        
-        if should_alert:
+                cache_key = get_cache_key(entry["item"])
+                last_alert = seen.get(cache_key)
+                debug_log(f"SUPPRESS key={cache_key} last={format_epoch_for_log(last_alert)} ttl={SEEN_TTL_DAYS}d")
+        else:
+            # Fallback for entries without item data (shouldn't happen in normal flow)
             final_entries.append(entry)
-            if reason == "ttl_expired":
-                debug_log(f"ALLOW-TTL key={cache_key} last={format_epoch_for_log(last_alert)} ttl={SEEN_TTL_DAYS}d")
     
     debug_log(f"[RESULT] After TTL filtering: {len(final_entries)} entries to alert")
     
