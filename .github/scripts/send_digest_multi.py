@@ -99,7 +99,12 @@ def parse_dt(s):
     
     # Try most common format first: 2024-12-19 (ISO date only)
     try:
-        return datetime.fromisoformat(s).replace(tzinfo=timezone.utc)
+        dt = datetime.fromisoformat(s)
+        # If no timezone info, assume UTC; otherwise convert to UTC
+        if dt.tzinfo is None:
+            return dt.replace(tzinfo=timezone.utc)
+        else:
+            return dt.astimezone(timezone.utc)
     except:
         pass
     
@@ -114,7 +119,9 @@ def parse_dt(s):
     
     for fmt in formats:
         try:
-            return datetime.strptime(s, fmt).replace(tzinfo=timezone.utc)
+            dt = datetime.strptime(s, fmt)
+            # These formats don't include timezone info, so assume UTC
+            return dt.replace(tzinfo=timezone.utc)
         except:
             continue
     
@@ -261,7 +268,7 @@ def main():
         debug_log("[INFO] No items to send in digest")
         # Still save seen cache to prune stale entries on quiet runs
         save_seen(seen, SEEN_TTL_DAYS, str(seen_cache_path))
-        return
+        return True  # Success case - no items to send
     
     # Format items for display
     lines = []
@@ -271,13 +278,13 @@ def main():
         url = get_primary_url(item)
         season = get_unified_season(item)
         
-        # Format location with channel mode (simplified)
+        # Format location with digest mode for consistency
         locations = item.get("locations", [])
-        location = format_location(locations, mode="channel")
+        location = format_location(locations, mode="digest")
         
         # Log location resolution for debugging (if multiple locations)
         if locations and len(locations) > 1:
-            log_location_resolution(company, title, locations, location, "channel")
+            log_location_resolution(company, title, locations, location, "digest")
         
         # Extract source repo name for display (e.g., "SimplifyJobs" or "vanshb03")
         source = item.get("_repo", "").split("/")[0] if item.get("_repo") else None
@@ -302,12 +309,15 @@ def main():
         save_seen(seen, SEEN_TTL_DAYS, str(seen_cache_path))
         debug_log(f"[CACHE] Updated seen cache with {len(final_items)} new items")
         debug_log(f"[SUCCESS] Digest sent with {len(final_items)} items")
+        return True
     else:
         debug_log("[ERROR] Failed to send digest - not updating seen cache")
-        exit(1)
+        return False
     
     debug_log("[DIGEST] Completed send_digest_multi.py")
 
 
 if __name__ == "__main__":
-    main()
+    import sys
+    success = main()
+    sys.exit(0 if success else 1)
