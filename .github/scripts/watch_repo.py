@@ -72,6 +72,26 @@ def send_telegram(text):
     debug_log("[TELEGRAM] Message sent successfully")
     return True
 
+def migrate_legacy_state():
+    """Migrate from old single last_seen_sha.txt to per-repo state files"""
+    legacy_file = STATE_DIR / "last_seen_sha.txt"
+    if not legacy_file.exists():
+        return
+    
+    try:
+        legacy_sha = legacy_file.read_text().strip()
+        debug_log(f"[MIGRATE] Found legacy state file with SHA: {legacy_sha[:8]}")
+        
+        # For safety, we won't migrate to avoid compatibility issues - let repos start fresh
+        debug_log(f"[MIGRATE] Not migrating legacy SHA to avoid compatibility issues - repos will start fresh")
+        
+        # Rename legacy file to prevent repeated migration attempts
+        backup_file = STATE_DIR / "last_seen_sha.txt.backup"
+        legacy_file.rename(backup_file)
+        debug_log(f"[MIGRATE] Legacy state backed up to: {backup_file}")
+        
+    except Exception as e:
+        debug_log(f"[MIGRATE] Failed to migrate legacy state: {e}")
 
 def main():
     """Main execution logic"""
@@ -79,6 +99,9 @@ def main():
     debug_log(f"[CONFIG] TARGET_REPOS: {TARGET_REPOS}")
     debug_log(f"[CONFIG] WINDOW_HOURS: {WINDOW_HOURS}")
     debug_log(f"[CONFIG] SEEN_TTL_DAYS: {SEEN_TTL_DAYS}")
+    
+    # Migrate legacy state if needed
+    migrate_legacy_state()
     
     # Load seen cache with TTL
     ttl_seconds = SEEN_TTL_DAYS * 86400
