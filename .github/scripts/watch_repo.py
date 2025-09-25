@@ -196,34 +196,27 @@ def main():
     
     debug_log(f"[RESULT] After deduplication: {len(deduped_entries)} unique entries")
     
-    # Apply TTL-based filtering
+    # Apply TTL-based filtering (reuse should_alert_item for reopen logic)
     final_entries = []
     for entry in deduped_entries:
-        # Get cache key for TTL checking
-        cache_key = None
+        # Use the same TTL logic that watcher_core used, including reopen detection
         if entry.get("item"):
-            cache_key = get_cache_key(entry["item"])
-        if not cache_key:
-            # Fallback: derive from dedup key tuple
-            cache_key = entry["key"][1] if isinstance(entry["key"], tuple) else str(entry["key"])
-        
-        # Check TTL
-        last_alert = seen.get(cache_key)
-        should_alert = True
-        reason = "new"
-        
-        if last_alert is not None:
-            if now_epoch - last_alert <= ttl_seconds:
-                should_alert = False
-                reason = "suppressed"
-                debug_log(f"SUPPRESS key={cache_key} last={format_epoch_for_log(last_alert)} ttl={SEEN_TTL_DAYS}d")
+            should_alert, reason = should_alert_item(entry["item"], seen, ttl_seconds, now_epoch)
+            if should_alert:
+                final_entries.append(entry)
+                if reason == "reopen":
+                    debug_log(f"ALLOW-REOPEN item updated, allowing despite TTL")
+                elif reason == "ttl_expired":
+                    cache_key = get_cache_key(entry["item"])
+                    last_alert = seen.get(cache_key)
+                    debug_log(f"ALLOW-TTL key={cache_key} last={format_epoch_for_log(last_alert)} ttl={SEEN_TTL_DAYS}d")
             else:
-                reason = "ttl_expired"
-        
-        if should_alert:
+                cache_key = get_cache_key(entry["item"])
+                last_alert = seen.get(cache_key)
+                debug_log(f"SUPPRESS key={cache_key} last={format_epoch_for_log(last_alert)} ttl={SEEN_TTL_DAYS}d")
+        else:
+            # Fallback for entries without item data (shouldn't happen in normal flow)
             final_entries.append(entry)
-            if reason == "ttl_expired":
-                debug_log(f"ALLOW-TTL key={cache_key} last={format_epoch_for_log(last_alert)} ttl={SEEN_TTL_DAYS}d")
     
     debug_log(f"[RESULT] After TTL filtering: {len(final_entries)} entries to alert")
     
