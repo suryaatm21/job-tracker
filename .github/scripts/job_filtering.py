@@ -4,11 +4,6 @@ Job filtering and categorization utilities.
 Handles category-based filtering for different use cases (DM alerts vs digest).
 """
 
-#!/usr/bin/env python3
-"""
-Job filtering and categorization utilities.
-Handles category-based filtering for different use cases (DM alerts vs digest).
-"""
 from state_utils import should_include_item
 
 # Category filtering: Only allow these categories for DM alerts (strict filtering)
