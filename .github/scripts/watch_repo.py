@@ -214,9 +214,9 @@ def main():
                     company = item.get("company_name", "Unknown")
                     title = item.get("title", "Unknown")
                     debug_log(f"ALLOW-REOPEN {company} - {title} | URL={url[:50]}... | updated_epoch={updated_epoch} ({format_epoch_for_log(updated_epoch)})")
-                elif reason in ["ttl_expired", "ttl_expired_after_grace"]:
+                elif reason in ["ttl_expired"]:
                     last_alert = seen.get(cache_key)
-                    debug_log(f"ALLOW-TTL key={cache_key} last={format_epoch_for_log(last_alert)} ttl={SEEN_TTL_DAYS}d reason={reason}")
+                    debug_log(f"ALLOW-TTL key={cache_key} last={format_epoch_for_log(last_alert)} ttl={SEEN_TTL_DAYS}d")
                 elif reason == "new":
                     debug_log(f"ALLOW-NEW key={cache_key}")
             else:
