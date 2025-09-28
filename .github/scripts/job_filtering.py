@@ -5,6 +5,7 @@ Handles category-based filtering for different use cases (DM alerts vs digest).
 """
 
 from state_utils import should_include_item
+from github_helper import debug_log
 
 # Category filtering: Only allow these categories for DM alerts (strict filtering)
 ALLOWED_CATEGORIES_DM = {
@@ -53,6 +54,7 @@ def classify_job_category(job):
         
         # Category exists but not mappable - fall back to title classification
         # This handles cases where SimplifyJobs adds new categories
+        debug_log(f"[CATEGORY-UNMAPPED] Unknown category '{category}' for job: {job.get('company_name', 'Unknown')} - {job.get('title', 'Unknown')[:50]}... | Falling back to title classification")
     
     # Fallback: classify by title if no category exists or category not mappable
     title = job.get("title", "").lower()
