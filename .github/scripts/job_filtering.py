@@ -12,6 +12,17 @@ ALLOWED_CATEGORIES_DM = {
     "Data Science, AI & Machine Learning"
 }
 
+# SimplifyJobs actual category labels → canonical mapping for DM filtering
+SIMPLIFY_CATEGORY_MAPPING = {
+    "Software": "Software Engineering",
+    "AI/ML/Data": "Data Science, AI & Machine Learning", 
+    "Data Science": "Data Science, AI & Machine Learning",
+    "Machine Learning": "Data Science, AI & Machine Learning",
+    "AI": "Data Science, AI & Machine Learning",
+    "Software Engineering": "Software Engineering",  # Already canonical
+    "Data Science, AI & Machine Learning": "Data Science, AI & Machine Learning"  # Already canonical
+}
+
 # Category filtering for digest: allow several categories, exclude "Other"
 ALLOWED_CATEGORIES_DIGEST = {
     "Software Engineering",
@@ -30,12 +41,20 @@ def classify_job_category(job):
     # First check if there's an existing category field (SimplifyJobs has this)
     if "category" in job and job["category"]:
         category = job["category"].strip()
+        
+        # Map SimplifyJobs actual labels to canonical categories
+        canonical_category = SIMPLIFY_CATEGORY_MAPPING.get(category)
+        if canonical_category:
+            return canonical_category
+            
+        # Check if it's already in canonical form
         if category in ALLOWED_CATEGORIES_DM:
             return category
-        # If existing category is not in allowed list, filter out
-        return None
+        
+        # Category exists but not mappable - fall back to title classification
+        # This handles cases where SimplifyJobs adds new categories
     
-    # Fallback: classify by title if no category exists
+    # Fallback: classify by title if no category exists or category not mappable
     title = job.get("title", "").lower()
     
     # Data Science & AI & Machine Learning (first priority for overlapping terms)
