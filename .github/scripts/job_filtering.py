@@ -5,11 +5,23 @@ Handles category-based filtering for different use cases (DM alerts vs digest).
 """
 
 from state_utils import should_include_item
+from github_helper import debug_log
 
 # Category filtering: Only allow these categories for DM alerts (strict filtering)
 ALLOWED_CATEGORIES_DM = {
     "Software Engineering", 
     "Data Science, AI & Machine Learning"
+}
+
+# SimplifyJobs actual category labels → canonical mapping for DM filtering
+SIMPLIFY_CATEGORY_MAPPING = {
+    "Software": "Software Engineering",
+    "AI/ML/Data": "Data Science, AI & Machine Learning", 
+    "Data Science": "Data Science, AI & Machine Learning",
+    "Machine Learning": "Data Science, AI & Machine Learning",
+    "AI": "Data Science, AI & Machine Learning",
+    "Software Engineering": "Software Engineering",  # Already canonical
+    "Data Science, AI & Machine Learning": "Data Science, AI & Machine Learning"  # Already canonical
 }
 
 # Category filtering for digest: allow several categories, exclude "Other"
@@ -30,12 +42,21 @@ def classify_job_category(job):
     # First check if there's an existing category field (SimplifyJobs has this)
     if "category" in job and job["category"]:
         category = job["category"].strip()
+        
+        # Map SimplifyJobs actual labels to canonical categories
+        canonical_category = SIMPLIFY_CATEGORY_MAPPING.get(category)
+        if canonical_category:
+            return canonical_category
+            
+        # Check if it's already in canonical form
         if category in ALLOWED_CATEGORIES_DM:
             return category
-        # If existing category is not in allowed list, filter out
-        return None
+        
+        # Category exists but not mappable - fall back to title classification
+        # This handles cases where SimplifyJobs adds new categories
+        debug_log(f"[CATEGORY-UNMAPPED] Unknown category '{category}' for job: {job.get('company_name', 'Unknown')} - {job.get('title', 'Unknown')[:50]}... | Falling back to title classification")
     
-    # Fallback: classify by title if no category exists
+    # Fallback: classify by title if no category exists or category not mappable
     title = job.get("title", "").lower()
     
     # Data Science & AI & Machine Learning (first priority for overlapping terms)

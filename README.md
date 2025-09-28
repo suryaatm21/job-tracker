@@ -66,6 +66,8 @@ Environment variables in workflows:
 - **Save strategy**: Always save a new cache at the end of a run (immutable), then prune old caches with a cleanup workflow (below).
 - For TTL details, see `docs/TTL_IMPLEMENTATION.md`.
 
+Note on reopen/grace window: the watcher uses a short "reopen" grace window (default 1 hour) when deciding whether a previously alerted listing that shows a newer `date_updated` should re-alert. Minor timestamp bumps or metadata-only tweaks within this grace window are suppressed to avoid duplicate alerts; larger updates after the grace period are treated as reopens and will notify again. This behavior is controlled by the `REOPEN_GRACE_PERIOD` constant in the code and can be tuned if needed.
+
 ## Workflows
 
 ### DM Fast Watch (`.github/workflows/dm-fast-watch.yml`)
