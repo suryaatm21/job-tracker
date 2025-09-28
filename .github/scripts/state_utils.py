@@ -6,6 +6,7 @@ Provides utilities to track when job listings were last alerted and allow
 re-opened roles (updated date_updated) to alert again immediately.
 """
 import json
+import os
 import pathlib
 import time
 from datetime import datetime, timezone
@@ -13,6 +14,20 @@ from urllib.parse import urlparse
 
 # Reopen detection grace period - prevents identical re-additions from bypassing TTL
 REOPEN_GRACE_PERIOD = 3600  # 1 hour in seconds
+
+# Per-repo grace period overrides (environment variable fallbacks)
+def get_repo_grace_period(repo_name):
+    """Get grace period for specific repo, with env var overrides"""
+    if not repo_name:
+        return REOPEN_GRACE_PERIOD
+    
+    repo_lower = repo_name.lower()
+    if "simplify" in repo_lower:
+        return int(os.getenv("SIMPLIFY_REOPEN_GRACE_SECONDS", REOPEN_GRACE_PERIOD))
+    elif "vansh" in repo_lower:
+        return int(os.getenv("VANSH_REOPEN_GRACE_SECONDS", REOPEN_GRACE_PERIOD))
+    else:
+        return REOPEN_GRACE_PERIOD
 
 def get_primary_url(item):
     """Return the canonical URL for a listing (url or application_link)."""
@@ -140,7 +155,7 @@ def save_seen(seen, ttl_days, path=".state/seen.json", max_entries=200000):
     except Exception as e:
         print(f"Warning: Failed to save seen cache to {path}: {e}")
 
-def should_alert_item(item, seen, ttl_seconds, now_epoch):
+def should_alert_item(item, seen, ttl_seconds, now_epoch, repo_override=None):
     """
     Determine if an item should trigger an alert based on seen cache and TTL.
     
@@ -149,6 +164,7 @@ def should_alert_item(item, seen, ttl_seconds, now_epoch):
         seen: dict[str, int] seen cache
         ttl_seconds: int, TTL in seconds
         now_epoch: int, current time as epoch seconds
+        repo_override: Optional repo name for per-repo grace period (e.g., "SimplifyJobs/repo")
     
     Returns:
         tuple[bool, str]: (should_alert, reason)
@@ -167,9 +183,12 @@ def should_alert_item(item, seen, ttl_seconds, now_epoch):
     # Check if job was re-opened (updated after last alert) with grace period
     updated_epoch = parse_epoch(item.get("date_updated")) or parse_epoch(item.get("date_posted"))
     if updated_epoch is not None and updated_epoch > last_alert:
-        # Grace period: only treat as reopen if update is at least 1 hour after last alert
-        # This prevents identical re-additions with bumped timestamps from bypassing TTL
-        if updated_epoch - last_alert >= REOPEN_GRACE_PERIOD:
+        # Get per-repo grace period if repo is provided
+        grace_period = get_repo_grace_period(repo_override) if repo_override else REOPEN_GRACE_PERIOD
+        
+        # Grace period: only treat as reopen if enough time has passed since last alert
+        # This prevents spam re-alerts for minor updates but allows genuine reopens after grace period
+        if now_epoch - last_alert >= grace_period:
             return True, "reopen"
         # Within grace period - fall through to TTL check
     
