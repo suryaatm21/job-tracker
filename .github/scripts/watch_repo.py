@@ -18,12 +18,13 @@ from datetime import datetime
 from github_helper import debug_log
 from state_utils import (
     load_seen, save_seen, should_alert_item, 
-    get_cache_key, format_epoch_for_log, should_include_item
+    get_cache_key, format_epoch_for_log, should_include_item,
+    parse_epoch, get_primary_url
 )
 from format_utils import format_location, log_location_resolution, format_job_line
 from telegram_utils import send_message
 from repo_utils import get_default_branch, detect_listings_path, get_repo_entries
-from dedup_utils import get_dedup_key, get_primary_url, get_unified_season
+from dedup_utils import get_dedup_key, get_unified_season
 from job_filtering import should_process_repo_item
 from watcher_core import process_repo_entries
 
@@ -204,16 +205,24 @@ def main():
             should_alert, reason = should_alert_item(entry["item"], seen, ttl_seconds, now_epoch)
             if should_alert:
                 final_entries.append(entry)
+                cache_key = get_cache_key(entry["item"])
                 if reason == "reopen":
-                    debug_log(f"ALLOW-REOPEN item updated, allowing despite TTL")
-                elif reason == "ttl_expired":
-                    cache_key = get_cache_key(entry["item"])
+                    # Enhanced logging for reopen events
+                    item = entry["item"]
+                    url = get_primary_url(item)
+                    updated_epoch = parse_epoch(item.get("date_updated")) or parse_epoch(item.get("date_posted"))
+                    company = item.get("company_name", "Unknown")
+                    title = item.get("title", "Unknown")
+                    debug_log(f"ALLOW-REOPEN {company} - {title} | URL={url[:50]}... | updated_epoch={updated_epoch} ({format_epoch_for_log(updated_epoch)})")
+                elif reason in ["ttl_expired", "ttl_expired_after_grace"]:
                     last_alert = seen.get(cache_key)
-                    debug_log(f"ALLOW-TTL key={cache_key} last={format_epoch_for_log(last_alert)} ttl={SEEN_TTL_DAYS}d")
+                    debug_log(f"ALLOW-TTL key={cache_key} last={format_epoch_for_log(last_alert)} ttl={SEEN_TTL_DAYS}d reason={reason}")
+                elif reason == "new":
+                    debug_log(f"ALLOW-NEW key={cache_key}")
             else:
                 cache_key = get_cache_key(entry["item"])
                 last_alert = seen.get(cache_key)
-                debug_log(f"SUPPRESS key={cache_key} last={format_epoch_for_log(last_alert)} ttl={SEEN_TTL_DAYS}d")
+                debug_log(f"SUPPRESS key={cache_key} last={format_epoch_for_log(last_alert)} ttl={SEEN_TTL_DAYS}d reason={reason}")
         else:
             # Fallback for entries without item data (shouldn't happen in normal flow)
             final_entries.append(entry)
