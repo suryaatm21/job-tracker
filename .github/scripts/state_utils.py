@@ -11,6 +11,9 @@ import time
 from datetime import datetime, timezone
 from urllib.parse import urlparse
 
+# Reopen detection grace period - prevents identical re-additions from bypassing TTL
+REOPEN_GRACE_PERIOD = 86400  # 1 day in seconds
+
 def get_primary_url(item):
     """Return the canonical URL for a listing (url or application_link)."""
     return (item.get("url") or item.get("application_link") or "").strip()
@@ -161,16 +164,20 @@ def should_alert_item(item, seen, ttl_seconds, now_epoch):
     if last_alert is None:
         return True, "new"
     
-    # Check if TTL has expired
+    # Check if job was re-opened (updated after last alert) with grace period
+    updated_epoch = parse_epoch(item.get("date_updated")) or parse_epoch(item.get("date_posted"))
+    if updated_epoch is not None and updated_epoch > last_alert:
+        # Grace period: only treat as reopen if update is at least 1 hour after last alert
+        # This prevents identical re-additions with bumped timestamps from bypassing TTL
+        if updated_epoch - last_alert >= REOPEN_GRACE_PERIOD:
+            return True, "reopen"
+        # Within grace period - fall through to TTL check
+    
+    # Check if TTL has expired (covers both normal TTL and post-grace-period cases)
     if now_epoch - last_alert > ttl_seconds:
         return True, "ttl_expired"
     
-    # Check if job was re-opened (updated after last alert)
-    updated_epoch = parse_epoch(item.get("date_updated")) or parse_epoch(item.get("date_posted"))
-    if updated_epoch is not None and updated_epoch > last_alert:
-        return True, "reopen"
-    
-    # Suppress: within TTL and no recent update
+    # Suppress: within TTL and no recent update (or update within grace period)
     return False, "suppressed"
 
 def format_epoch_for_log(epoch):
