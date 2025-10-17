@@ -18,9 +18,48 @@ HEADERS = {
     "Accept": "application/vnd.github+json",
 }
 
+_LEVEL_ORDER = {"DEBUG": 10, "INFO": 20, "WARN": 30, "ERROR": 40}
+_PREFIX_LEVELS = {
+    "[ERROR]": "ERROR",
+    "[WARN]": "WARN",
+    "[RESULT]": "INFO",
+    "[SUMMARY]": "INFO",
+    "[SEND]": "INFO",
+    "[CONFIG]": "INFO",
+    "[INFO]": "INFO",
+    "[MIGRATE]": "INFO",
+    "[TELEGRAM]": "INFO",
+    "[CACHE]": "INFO",
+    "[WINDOW]": "INFO",
+    "[REPO]": "INFO",
+    "[AGGREGATE]": "INFO",
+    "[DEDUP]": "INFO",
+    "[TTL]": "INFO",
+    "[LIMIT]": "INFO",
+    "[DIGEST]": "INFO",
+    "[BATCH]": "INFO",
+}
+
+_LOG_LEVEL_NAME = os.getenv("WATCHER_LOG_LEVEL", "INFO").upper()
+if _LOG_LEVEL_NAME not in _LEVEL_ORDER:
+    _LOG_LEVEL_NAME = "INFO"
+
+
+def _resolve_level(msg: str) -> str:
+    """Infer log level from message prefix; default to DEBUG."""
+    if msg.startswith("["):
+        prefix = msg.split(" ", 1)[0]
+        if prefix in _PREFIX_LEVELS:
+            return _PREFIX_LEVELS[prefix]
+    return "DEBUG"
+
+
 def debug_log(msg):
-    """Lightweight debug logging with timestamp"""
-    print(f"[{datetime.now().isoformat()}] DEBUG: {msg}")
+    """Lightweight logging with configurable verbosity via WATCHER_LOG_LEVEL."""
+    level = _resolve_level(msg)
+    if _LEVEL_ORDER[level] < _LEVEL_ORDER[_LOG_LEVEL_NAME]:
+        return
+    print(f"[{datetime.now().isoformat()}] {level}: {msg}")
 
 def gh_get(url, **params):
     """Call GitHub API and return parsed JSON, raising on HTTP errors"""

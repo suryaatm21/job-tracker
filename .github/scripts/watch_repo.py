@@ -207,18 +207,13 @@ def main():
                 final_entries.append(entry)
                 cache_key = get_cache_key(entry["item"])
                 if reason == "reopen":
-                    # Enhanced logging for reopen events with telemetry
+                    # Enhanced logging for reopen events
                     item = entry["item"]
                     url = get_primary_url(item)
                     updated_epoch = parse_epoch(item.get("date_updated")) or parse_epoch(item.get("date_posted"))
                     company = item.get("company_name", "Unknown")
                     title = item.get("title", "Unknown")
-                    last_alert = seen.get(cache_key)
-                    
-                    # Telemetry: delta = time between update and last alert, elapsed = time since last alert
-                    delta = updated_epoch - last_alert if updated_epoch and last_alert else 0
-                    elapsed = now_epoch - last_alert if last_alert else 0
-                    debug_log(f"ALLOW-REOPEN {company} - {title} | URL={(url or '')[:50]}... | delta={delta}s elapsed={elapsed}s | updated_epoch={updated_epoch} ({format_epoch_for_log(updated_epoch)})")
+                    debug_log(f"ALLOW-REOPEN {company} - {title} | URL={url[:50]}... | updated_epoch={updated_epoch} ({format_epoch_for_log(updated_epoch)})")
                 elif reason in ["ttl_expired"]:
                     last_alert = seen.get(cache_key)
                     debug_log(f"ALLOW-TTL key={cache_key} last={format_epoch_for_log(last_alert)} ttl={SEEN_TTL_DAYS}d")

@@ -21,7 +21,7 @@ def process_repo_entries(repo, listings_path, last_seen_sha, watch_paths,
     
     commits = get_repo_entries(repo, per_page=20)
     if not commits:
-        debug_log(f"[WATCH] {repo} → No commits found")
+        debug_log(f"[INFO] {repo} has no commits available to scan")
         return []
     
     newest_sha = commits[0]['sha'][:8]
@@ -39,10 +39,10 @@ def process_repo_entries(repo, listings_path, last_seen_sha, watch_paths,
         if last_seen_sha and commits and commits[0]["sha"] == last_seen_sha:
             debug_log(f"[INFO] {repo} last_seen is already newest; likely no pushes since previous run")
         else:
-            debug_log(f"[COMMITS] {repo} no new commits since last run")
+            debug_log(f"[INFO] {repo} no new commits since last run")
         return []
-    
-    debug_log(f"[WATCH] {repo} → Processing {len(new)} new commits")
+
+    debug_log(f"[INFO] {repo} processing {len(new)} new commits")
     
     # Accumulate new entries from all commits
     all_new_entries = []
@@ -128,5 +128,5 @@ def process_repo_entries(repo, listings_path, last_seen_sha, watch_paths,
         
         debug_log(f"[DELTA] {repo} → commit {sha[:8]} new_entries={commit_new_count}, after_window={commit_window_count}, after_category={commit_category_count}")
     
-    debug_log(f"[WATCH] {repo} → total accumulated entries: {len(all_new_entries)}")
+    debug_log(f"[SUMMARY] {repo} accumulated {len(all_new_entries)} new entries")
     return all_new_entries

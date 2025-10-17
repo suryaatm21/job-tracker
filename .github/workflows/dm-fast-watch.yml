@@ -44,6 +44,7 @@ env:
   WINDOW_HOURS: '24'
   SEEN_TTL_DAYS: '7' # DM alerts: shorter TTL for frequent updates
   STATE_DIR: '.state/dm-watcher' # Separate state directory for DM watcher
+  FILTER_GRADUATE_DEGREES: 'true'
 
 jobs:
   watch:
