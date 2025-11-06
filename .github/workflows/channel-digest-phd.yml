@@ -38,7 +38,7 @@ env:
   WINDOW_HOURS: '3'
   SEEN_TTL_DAYS: '14'
   STATE_DIR: '.state/channel-digest-phd'
-  DIGEST_CATEGORIES: '["Software Engineering","Data Science/AI/ML","Hardware Engineering","Quantitative Trading/Research","Product Management"]'
+  DIGEST_CATEGORIES: '["Software Engineering","Data Science, AI & Machine Learning","Hardware Engineering","Quantitative Finance","Product Management"]'
   FILTER_GRADUATE_DEGREES: 'phd_only'  # Only PhD/MS positions
 
 jobs:

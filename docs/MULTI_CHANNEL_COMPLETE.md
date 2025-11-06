@@ -15,7 +15,7 @@ Successfully implemented 5 separate Telegram channel digest workflows, each with
 |----------|-----------|---------------|----------|----------------|
 | `channel-digest.yml` | SWE, Data Science/AI/ML | BS only (`true`) | Every 2h at :00 | `TELEGRAM_CHAT_ID_CHANNEL` |
 | `channel-digest-hardware.yml` | Hardware Engineering | All levels (`false`) | Every 4h at :15 | `TELEGRAM_CHAT_ID_CHANNEL_HARDWARE` |
-| `channel-digest-quant.yml` | Quantitative Trading/Research | All levels (`false`) | Every 5h at :30 | `TELEGRAM_CHAT_ID_CHANNEL_QUANT` |
+| `channel-digest-quant.yml` | Quantitative Finance | All levels (`false`) | Every 5h at :30 | `TELEGRAM_CHAT_ID_CHANNEL_QUANT` |
 | `channel-digest-pm.yml` | Product Management | All levels (`false`) | Every 6h at :45 | `TELEGRAM_CHAT_ID_CHANNEL_PM` |
 | `channel-digest-phd.yml` | All categories | PhD/MS only (`phd_only`) | Every 3h at :50 | `TELEGRAM_CHAT_ID_CHANNEL_PHD` |
 
@@ -58,24 +58,29 @@ Add these 5 secrets to your repository at:
 ## Filter Configuration
 
 ### Category Filtering (`DIGEST_CATEGORIES`)
-Each workflow specifies which categories to include:
+Each workflow specifies which categories to include (must match canonical names):
 ```json
 // SWE/ML BS
-["Software Engineering", "Data Science/AI/ML"]
+["Software Engineering", "Data Science, AI & Machine Learning"]
 
 // Hardware
 ["Hardware Engineering"]
 
 // Quant
-["Quantitative Trading/Research"]
+["Quantitative Finance"]
 
 // PM
 ["Product Management"]
 
 // PhD (all categories)
-["Software Engineering", "Data Science/AI/ML", "Hardware Engineering", 
- "Quantitative Trading/Research", "Product Management"]
+["Software Engineering", "Data Science, AI & Machine Learning", "Hardware Engineering", 
+ "Quantitative Finance", "Product Management"]
 ```
+
+**Important:** Category names must match exactly as defined in `job_filtering.py`:
+- ✅ "Data Science, AI & Machine Learning" (with commas and ampersand)
+- ✅ "Quantitative Finance" (not "Quantitative Trading/Research")
+- ✅ "Software Engineering", "Hardware Engineering", "Product Management"
 
 ### Degree Filtering (`FILTER_GRADUATE_DEGREES`)
 - **`true`** - Exclude graduate degrees (BS/BA only)

@@ -41,7 +41,7 @@ env:
   WINDOW_HOURS: '2'
   SEEN_TTL_DAYS: '14'
   STATE_DIR: '.state/channel-digest'
-  DIGEST_CATEGORIES: '["Software Engineering", "Data Science, AI & Machine Learning"]'
+  DIGEST_CATEGORIES: '["Software Engineering","Data Science, AI & Machine Learning"]'
   FILTER_GRADUATE_DEGREES: 'true'  # Exclude PhD/MS roles
 
 jobs:

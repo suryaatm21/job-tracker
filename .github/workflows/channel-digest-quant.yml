@@ -38,7 +38,7 @@ env:
   WINDOW_HOURS: '5'
   SEEN_TTL_DAYS: '14'
   STATE_DIR: '.state/channel-digest-quant'
-  DIGEST_CATEGORIES: '["Quantitative Trading/Research"]'
+  DIGEST_CATEGORIES: '["Quantitative Finance"]'
   FILTER_GRADUATE_DEGREES: 'false'  # Allow all degree levels
 
 jobs:
