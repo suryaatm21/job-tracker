@@ -22,7 +22,7 @@ from state_utils import (
     parse_epoch, get_primary_url
 )
 from format_utils import format_location, log_location_resolution, format_job_line
-from telegram_utils import send_message
+from telegram_utils import send_message, batch_send_message
 from repo_utils import get_default_branch, detect_listings_path, get_repo_entries
 from dedup_utils import get_dedup_key, get_unified_season
 from job_filtering import should_process_repo_item
@@ -63,18 +63,37 @@ STATE_DIR = pathlib.Path(os.getenv("STATE_DIR", ".state"))
 STATE_DIR.mkdir(exist_ok=True, parents=True)
 
 def send_telegram(text):
-    """Send message to Telegram with debug logging"""
+    """Send message to Telegram with debug logging and automatic batching"""
     debug_log(f"[TELEGRAM] Sending message: {len(text)} chars, preview: {text[:100]}...")
     tok = os.getenv("TELEGRAM_BOT_TOKEN"); chat = os.getenv("TELEGRAM_CHAT_ID")
     if not tok or not chat: 
         debug_log("[TELEGRAM] Missing credentials - BOT_TOKEN or CHAT_ID not set")
         return False
     
-    success, status, body = send_message(tok, chat, text)
-    debug_log(f"[TELEGRAM] STATUS={status} BODY={body[:200] if body else 'None'}")
+    # If message is short enough, send as single message
+    if len(text) <= 4000:
+        success, status, body = send_message(tok, chat, text)
+        debug_log(f"[TELEGRAM] STATUS={status} BODY={body[:200] if body else 'None'}")
+        
+        if not success:
+            debug_log(f"[TELEGRAM] Send failed: {status} - {body}")
+        
+        return success
+    
+    # Message is too long - use batching
+    debug_log(f"[TELEGRAM] Message too long ({len(text)} chars), using batching")
+    lines = text.split('\n')
+    if not lines:
+        return True
+    
+    # First line is header, rest is content
+    header = lines[0]
+    content_lines = lines[1:]
+    
+    success, results = batch_send_message(tok, chat, header, content_lines)
     
     if not success:
-        debug_log(f"[TELEGRAM] Send failed: {status} - {body}")
+        debug_log(f"[TELEGRAM] Some batches failed: {[r for r in results if r[1] < 200 or r[1] >= 300]}")
     
     return success
 
