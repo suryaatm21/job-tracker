@@ -38,7 +38,7 @@ env:
   LISTINGS_PATH: '.github/scripts/listings.json'
   DATE_FIELD: 'date_posted'
   DATE_FALLBACK: 'date_updated'
-  WINDOW_HOURS: '2'
+  WINDOW_HOURS: '24'
   SEEN_TTL_DAYS: '14'
   STATE_DIR: '.state/channel-digest'
   DIGEST_CATEGORIES: '["Software Engineering","Data Science, AI & Machine Learning"]'

@@ -15,7 +15,7 @@ A Telegram bot that monitors multiple GitHub repositories for new internship lis
 - **TTL-based memory**: Remembers previously alerted jobs with configurable TTL to handle reopened positions.
 - **Dual notification modes**:
   - **DM alerts** (every 5 minutes): Immediate notifications for new listings within 24 hours.
-  - **Channel digest** (every 2 hours): Batched summaries with HTML formatting for channels.
+  - **Channel digests** (staggered schedules): Role-specific batched summaries with HTML formatting, all using 24-hour windows for reliable job capture.
 - **Intelligent location formatting**: Context-aware location resolution (CA/NY/NJ for DMs, Multi-location for digests).
 - **Message batching**: Automatically splits long messages to handle Telegram's 4096 character limit.
 - **Robust file fetching**: Multi-strategy fallback for GitHub Contents API with truncation handling.
@@ -24,10 +24,10 @@ A Telegram bot that monitors multiple GitHub repositories for new internship lis
 
 - **Definition**: The time window filters listings by their own timestamps (`date_posted` → fallback `date_updated`).
 - **Not commits**: We do not look for commits “within the window.” Commits are used only to detect changes; the window then filters which new/updated listings are recent enough to send.
-- **Where it’s used**:
-  - `dm-fast-watch.yml` (`watch_repo.py`): Detects new entries per commit since last seen SHA, then keeps only items with timestamps within `WINDOW_HOURS`.
-  - `channel-digest*.yml` (`send_digest_multi.py`): Scans current listings across repos and filters to those within `WINDOW_HOURS`.
-- **Typical values**: DMs use 24h by default; channel digest uses 2–8h. You can override during manual runs with the `force_window_hours` input.
+- **Where it's used**:
+  - `dm-fast-watch.yml` (`watch_repo.py`): Detects new entries per commit since last seen SHA, then keeps only items with timestamps within `WINDOW_HOURS` (24h).
+  - `channel-digest*.yml` (`send_digest_multi.py`): Scans current listings across repos and filters to those within `WINDOW_HOURS` (24h).
+- **Why 24 hours for digests**: Ensures reliable job capture with plenty of buffer for GitHub Actions delays, clock skew, or execution timing issues. TTL deduplication (14 days) prevents repeat notifications, so a generous window is safe and ensures no jobs are missed.
 
 ## Requirements
 
@@ -48,7 +48,7 @@ Set these in your GitHub Actions secrets:
 Environment variables in workflows:
 
 - `TARGET_REPOS` – JSON array of repositories: `["owner1/repo1", "owner2/repo2"]`
-- `WINDOW_HOURS` – Time window for filtering (24 for DMs, 4-8 for digests)
+- `WINDOW_HOURS` – Time window for filtering (24 for all workflows to ensure reliable capture)
 - `SEEN_TTL_DAYS` – How long to remember alerted jobs (default 14; tune per workflow)
 
 ### State & Caching (Immutable Actions Cache)
@@ -78,9 +78,15 @@ Note on reopen/grace window: the watcher uses a short "reopen" grace window (def
 
 ### Channel Digest (`.github/workflows/channel-digest.yml`)
 
-- **Schedule**: Every 4 hours
-- **Purpose**: Batched summaries for channels
-- **Features**: HTML formatting, message batching, longer time windows
+- **Schedule**: Every 2 hours
+- **Purpose**: Batched summaries for SWE/ML Bachelor's positions
+- **Features**: HTML formatting, message batching, 24-hour window with TTL deduplication
+
+### Channel Digest - Hardware/Quant/PM/PhD (`.github/workflows/channel-digest-*.yml`)
+
+- **Schedule**: Staggered (every 2-6 hours)
+- **Purpose**: Role-specific and degree-level batched summaries
+- **Features**: Category filtering, degree-level filtering, 24-hour windows
 
 ### Channel Digest Testing (`.github/workflows/channel-digest-testing.yml`)
 

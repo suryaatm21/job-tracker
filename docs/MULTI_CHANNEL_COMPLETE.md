@@ -11,15 +11,17 @@ Successfully implemented 5 separate Telegram channel digest workflows, each with
 
 ## Workflows Summary
 
-| Workflow | Categories | Degree Filter | Schedule | Chat ID Secret |
-|----------|-----------|---------------|----------|----------------|
-| `channel-digest.yml` | SWE, Data Science/AI/ML | BS only (`true`) | Every 2h at :00 | `TELEGRAM_CHAT_ID_CHANNEL` |
-| `channel-digest-hardware.yml` | Hardware Engineering | All levels (`false`) | Every 4h at :15 | `TELEGRAM_CHAT_ID_CHANNEL_HARDWARE` |
-| `channel-digest-quant.yml` | Quantitative Finance | All levels (`false`) | Every 5h at :30 | `TELEGRAM_CHAT_ID_CHANNEL_QUANT` |
-| `channel-digest-pm.yml` | Product Management | All levels (`false`) | Every 6h at :45 | `TELEGRAM_CHAT_ID_CHANNEL_PM` |
-| `channel-digest-phd.yml` | All categories | PhD/MS only (`phd_only`) | Every 3h at :50 | `TELEGRAM_CHAT_ID_CHANNEL_SWE_ML_PHD` |
+| Workflow | Categories | Degree Filter | Schedule | Window | Chat ID Secret |
+|----------|-----------|---------------|----------|--------|----------------|
+| `channel-digest.yml` | SWE, Data Science/AI/ML | BS only (`true`) | Every 2h at :00 | 24h | `TELEGRAM_CHAT_ID_CHANNEL` |
+| `channel-digest-hardware.yml` | Hardware Engineering | All levels (`false`) | Every 4h at :15 | 24h | `TELEGRAM_CHAT_ID_CHANNEL_HARDWARE` |
+| `channel-digest-quant.yml` | Quantitative Finance | All levels (`false`) | Every 5h at :30 | 24h | `TELEGRAM_CHAT_ID_CHANNEL_QUANT` |
+| `channel-digest-pm.yml` | Product Management | All levels (`false`) | Every 6h at :45 | 24h | `TELEGRAM_CHAT_ID_CHANNEL_PM` |
+| `channel-digest-phd.yml` | All categories | PhD/MS only (`phd_only`) | Every 3h at :50 | 24h | `TELEGRAM_CHAT_ID_CHANNEL_SWE_ML_PHD` |
 
 **Note:** The original `channel-digest.yml` uses legacy cache names (`channel-digest-state-v1`) to preserve existing TTL state and avoid duplicate messages.
+
+**Why 24-hour windows?** All digests use 24-hour windows to ensure reliable job capture with buffer for GitHub Actions delays, clock skew, or timing issues. TTL deduplication (14 days) prevents repeat notifications, so a generous window is safe.
 
 ---
 
