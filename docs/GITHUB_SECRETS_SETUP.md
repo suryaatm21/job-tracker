@@ -32,8 +32,8 @@ Add these 5 new secrets to enable the multi-channel digest workflows:
 - **Used by:** `channel-digest-pm.yml`
 - **Purpose:** Product Management jobs (all degree levels)
 
-### 4. TELEGRAM_CHAT_ID_CHANNEL_PHD
-- **Name:** `TELEGRAM_CHAT_ID_CHANNEL_PHD`
+### 4. TELEGRAM_CHAT_ID_CHANNEL_SWE_ML_PHD
+- **Name:** `TELEGRAM_CHAT_ID_CHANNEL_SWE_ML_PHD`
 - **Value:** Your PhD channel chat ID (from `.env`)
 - **Used by:** `channel-digest-phd.yml`
 - **Purpose:** Graduate degree positions only (all categories)
@@ -55,7 +55,7 @@ TELEGRAM_CHAT_ID_CHANNEL=<your_value>
 TELEGRAM_CHAT_ID_CHANNEL_HARDWARE=<your_value>
 TELEGRAM_CHAT_ID_CHANNEL_QUANT=<your_value>
 TELEGRAM_CHAT_ID_CHANNEL_PM=<your_value>
-TELEGRAM_CHAT_ID_CHANNEL_PHD=<your_value>
+TELEGRAM_CHAT_ID_CHANNEL_SWE_ML_PHD=<your_value>
 ```
 
 Copy each value **exactly** (including the negative sign if present).
@@ -70,7 +70,7 @@ After adding all secrets:
 - [ ] `TELEGRAM_CHAT_ID_CHANNEL_HARDWARE` (new)
 - [ ] `TELEGRAM_CHAT_ID_CHANNEL_QUANT` (new)
 - [ ] `TELEGRAM_CHAT_ID_CHANNEL_PM` (new)
-- [ ] `TELEGRAM_CHAT_ID_CHANNEL_PHD` (new)
+- [ ] `TELEGRAM_CHAT_ID_CHANNEL_SWE_ML_PHD` (new)
 - [ ] `TELEGRAM_BOT_TOKEN` (existing - verify it's set)
 
 Total: **6 secrets** should be configured in your repository.

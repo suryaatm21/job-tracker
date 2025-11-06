@@ -17,7 +17,7 @@ Successfully implemented 5 separate Telegram channel digest workflows, each with
 | `channel-digest-hardware.yml` | Hardware Engineering | All levels (`false`) | Every 4h at :15 | `TELEGRAM_CHAT_ID_CHANNEL_HARDWARE` |
 | `channel-digest-quant.yml` | Quantitative Finance | All levels (`false`) | Every 5h at :30 | `TELEGRAM_CHAT_ID_CHANNEL_QUANT` |
 | `channel-digest-pm.yml` | Product Management | All levels (`false`) | Every 6h at :45 | `TELEGRAM_CHAT_ID_CHANNEL_PM` |
-| `channel-digest-phd.yml` | All categories | PhD/MS only (`phd_only`) | Every 3h at :50 | `TELEGRAM_CHAT_ID_CHANNEL_PHD` |
+| `channel-digest-phd.yml` | All categories | PhD/MS only (`phd_only`) | Every 3h at :50 | `TELEGRAM_CHAT_ID_CHANNEL_SWE_ML_PHD` |
 
 **Note:** The original `channel-digest.yml` uses legacy cache names (`channel-digest-state-v1`) to preserve existing TTL state and avoid duplicate messages.
 
@@ -49,7 +49,7 @@ Add these 5 secrets to your repository at:
 2. **`TELEGRAM_CHAT_ID_CHANNEL_HARDWARE`** - Hardware channel
 3. **`TELEGRAM_CHAT_ID_CHANNEL_QUANT`** - Quant channel
 4. **`TELEGRAM_CHAT_ID_CHANNEL_PM`** - PM channel
-5. **`TELEGRAM_CHAT_ID_CHANNEL_PHD`** - Graduate degrees channel
+5. **`TELEGRAM_CHAT_ID_CHANNEL_SWE_ML_PHD`** - Graduate degrees channel (SWE/ML focus)
 
 **Note:** `TELEGRAM_BOT_TOKEN` is shared across all workflows (already exists).
 

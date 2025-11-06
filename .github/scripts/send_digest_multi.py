@@ -26,7 +26,7 @@ from format_utils import format_location, log_location_resolution, format_job_li
 from telegram_utils import batch_send_message
 from repo_utils import get_default_branch, detect_listings_path
 from dedup_utils import get_dedup_key, get_primary_url, get_unified_season
-from job_filtering import is_allowed_category_digest, should_process_digest_item
+from job_filtering import should_process_digest_item
 
 # Configuration
 TARGET_REPOS = json.loads(os.environ.get("TARGET_REPOS", '["vanshb03/Summer2026-Internships"]'))
@@ -232,12 +232,10 @@ def main():
             # Filter items
             repo_items = []
             for item in listings:
-                # Basic field check
+                # Apply unified filtering: quality checks + category + degree level
+                # Note: should_include_listing() already calls should_process_digest_item()
+                # which performs all filtering (quality, category, degree level)
                 if not should_include_listing(item):
-                    continue
-                
-                # Category filter for digest
-                if not is_allowed_category_digest(item):
                     continue
                 
                 # Time window filter
