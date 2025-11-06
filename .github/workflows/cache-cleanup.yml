@@ -14,7 +14,7 @@ on:
       keep_prefixes:
         description: "Comma-separated prefixes to keep"
         required: false
-        default: "dm-watcher-state-v1,channel-digest-state-v1,channel-digest-testing-state-v1"
+        default: "dm-watcher-state-v1,channel-digest-state-v1,channel-digest-hardware-state-v1,channel-digest-quant-state-v1,channel-digest-pm-state-v1,channel-digest-phd-state-v1"
         type: string
       keep_n_per_prefix:
         description: "How many newest caches to keep per prefix"
@@ -30,7 +30,7 @@ jobs:
   cleanup:
     runs-on: ubuntu-latest
     env:
-      DEFAULT_KEEP_PREFIXES: dm-watcher-state-v1,channel-digest-state-v1,channel-digest-testing-state-v1
+      DEFAULT_KEEP_PREFIXES: dm-watcher-state-v1,channel-digest-state-v1,channel-digest-hardware-state-v1,channel-digest-quant-state-v1,channel-digest-pm-state-v1,channel-digest-phd-state-v1
       DEFAULT_KEEP_N: "3"
     steps:
       - name: Ensure jq is available

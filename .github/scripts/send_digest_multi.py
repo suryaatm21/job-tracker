@@ -26,7 +26,7 @@ from format_utils import format_location, log_location_resolution, format_job_li
 from telegram_utils import batch_send_message
 from repo_utils import get_default_branch, detect_listings_path
 from dedup_utils import get_dedup_key, get_primary_url, get_unified_season
-from job_filtering import is_allowed_category_digest
+from job_filtering import is_allowed_category_digest, should_process_digest_item
 
 # Configuration
 TARGET_REPOS = json.loads(os.environ.get("TARGET_REPOS", '["vanshb03/Summer2026-Internships"]'))
@@ -35,6 +35,13 @@ DATE_FIELD = os.environ.get("DATE_FIELD", "date_posted")
 DATE_FALLBACK = os.environ.get("DATE_FALLBACK", "date_updated")
 WINDOW_HOURS = int(os.environ.get("WINDOW_HOURS", "4"))  # Default 4 hours for channel digest
 COUNT = int(os.environ.get("COUNT", "50") or "50")  # Handle empty string case
+
+# New: Category and degree filtering for multi-channel digests
+DIGEST_CATEGORIES = json.loads(os.environ.get("DIGEST_CATEGORIES", '["Software Engineering", "Data Science, AI & Machine Learning"]'))
+GRAD_FILTER_MODE = os.environ.get("FILTER_GRADUATE_DEGREES", "false").lower()  # 'true', 'false', or 'phd_only'
+
+debug_log(f"[CONFIG] DIGEST_CATEGORIES={DIGEST_CATEGORIES}")
+debug_log(f"[CONFIG] GRAD_FILTER_MODE={GRAD_FILTER_MODE}")
 
 # Support for FORCE_WINDOW_HOURS override for testing
 FORCE_WINDOW_HOURS = os.environ.get("FORCE_WINDOW_HOURS")
@@ -69,12 +76,22 @@ def get_listings(repo, path, ref=None):
 
 
 def should_include_listing(item):
-    """Filter items using shared quality gate plus digest-specific requirements"""
-    # First apply shared quality gate (active, visible, URL presence)
-    if not should_include_item(item):
+    """Filter items using new digest-specific filtering with category and degree level support"""
+    # Use the new unified filtering function
+    should_process, reason = should_process_digest_item(
+        item,
+        DIGEST_CATEGORIES,
+        GRAD_FILTER_MODE
+    )
+    
+    if not should_process:
+        # Debug log for filtered items
+        company = item.get("company_name", "Unknown")
+        title = (item.get("title") or "")[:50]
+        debug_log(f"[FILTER] Excluded: {company} - {title}... | Reason: {reason}")
         return False
     
-    # Digest-specific requirements to prevent blank formatting
+    # Additional digest-specific requirements to prevent blank formatting
     # Require both title and company_name for proper digest display
     title = (item.get("title") or "").strip()
     company = (item.get("company_name") or "").strip()
