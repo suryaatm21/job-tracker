@@ -1,8 +1,8 @@
-name: Channel digest (2h)
+name: Channel Digest (SWE/ML - BS)
 
 on:
   schedule:
-    - cron: '0 */2 * * *'
+    - cron: '0 */2 * * *'  # Every 2 hours at :00
   workflow_dispatch:
     inputs:
       command:
@@ -38,9 +38,11 @@ env:
   LISTINGS_PATH: '.github/scripts/listings.json'
   DATE_FIELD: 'date_posted'
   DATE_FALLBACK: 'date_updated'
-  WINDOW_HOURS: '24' # 2 hours for regular digest
-  SEEN_TTL_DAYS: '14' # Channel digest: longer TTL for less frequent updates
-  STATE_DIR: '.state/channel-digest' # Separate state directory for channel digest
+  WINDOW_HOURS: '24'
+  SEEN_TTL_DAYS: '14'
+  STATE_DIR: '.state/channel-digest'
+  DIGEST_CATEGORIES: '["Software Engineering","Data Science, AI & Machine Learning"]'
+  FILTER_GRADUATE_DEGREES: 'true'  # Exclude PhD/MS roles
 
 jobs:
   digest:
@@ -81,6 +83,8 @@ jobs:
           COUNT: ${{ github.event.inputs.count || '100' }}
           STATE_DIR: ${{ env.STATE_DIR }}
           FORCE_WINDOW_HOURS: ${{ github.event.inputs.force_window_hours }}
+          DIGEST_CATEGORIES: ${{ env.DIGEST_CATEGORIES }}
+          FILTER_GRADUATE_DEGREES: ${{ env.FILTER_GRADUATE_DEGREES }}
         run: python .github/scripts/send_digest_multi.py
 
       - name: Send latest listing to channel (manual runs only)

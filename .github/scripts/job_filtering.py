@@ -225,3 +225,88 @@ def get_category_stats():
         for cat, count in sorted_stats:
             debug_log(f"  {cat}: {count}")
     return _category_stats
+
+
+def is_allowed_category_for_digest(item, allowed_categories):
+    """
+    Check if item category matches the allowed categories for this digest.
+    
+    Args:
+        item: Job listing dict
+        allowed_categories: Set or list of category strings (e.g., ["Hardware Engineering"])
+    
+    Returns:
+        bool: True if category matches
+    """
+    cat = (item.get("category") or "").strip()
+    
+    if not cat:
+        # No category - classify by title
+        classified = classify_job_category(item)
+        return classified in allowed_categories if classified else False
+    
+    # Map category to canonical form
+    canonical = SIMPLIFY_CATEGORY_MAPPING.get(cat)
+    if canonical:
+        return canonical in allowed_categories
+    
+    # Try case-insensitive match
+    cat_lower = cat.lower()
+    for key, value in SIMPLIFY_CATEGORY_MAPPING.items():
+        if key.lower() == cat_lower:
+            return value in allowed_categories
+    
+    # Check if already canonical (case-insensitive)
+    for allowed in allowed_categories:
+        if allowed.lower() == cat_lower:
+            return True
+    
+    return False
+
+
+def is_graduate_degree_only(item):
+    """
+    Return True if position is ONLY for graduate students (PhD/MS).
+    This is the inverse of the undergraduate filter - use for PhD-only digest.
+    
+    Args:
+        item: Job dict with 'title' field
+        
+    Returns:
+        bool: True if the position requires graduate degree
+    """
+    return requires_graduate_degree(item)
+
+
+def should_process_digest_item(item, allowed_categories, grad_filter_mode='false'):
+    """
+    Filter item for digest workflows with configurable category and degree filtering.
+    
+    Args:
+        item: Job listing dict
+        allowed_categories: Set or list of allowed category strings
+        grad_filter_mode: 'true' (exclude grad), 'false' (all levels), 'phd_only' (only grad)
+    
+    Returns:
+        tuple[bool, str]: (should_include, reason)
+    """
+    # Quality checks first (active, visible, URL)
+    if not should_include_item(item):
+        return False, "quality"
+    
+    # Category filtering
+    if not is_allowed_category_for_digest(item, allowed_categories):
+        return False, "category"
+    
+    # Graduate degree filtering based on mode
+    if grad_filter_mode == 'true':
+        # Exclude PhD/MS roles (undergraduate digest)
+        if requires_graduate_degree(item):
+            return False, "graduate_degree"
+    elif grad_filter_mode == 'phd_only':
+        # Only include PhD/MS roles (graduate digest)
+        if not requires_graduate_degree(item):
+            return False, "not_graduate"
+    # else: grad_filter_mode == 'false' - no degree filtering, allow all levels
+    
+    return True, "allowed"

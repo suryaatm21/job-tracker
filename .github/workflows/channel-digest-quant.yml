@@ -1,0 +1,93 @@
+name: Channel Digest (Quant - All Levels)
+
+on:
+  schedule:
+    - cron: '30 */5 * * *'  # Every 5 hours at :30
+  workflow_dispatch:
+    inputs:
+      command:
+        description: 'Which manual command to run'
+        required: false
+        default: 'digest'
+        type: choice
+        options:
+          - digest
+      count:
+        description: 'Max items to include (digest)'
+        required: false
+        default: '100'
+      force_window_hours:
+        description: 'Override WINDOW_HOURS for testing (e.g., 720 for 30 days)'
+        required: false
+        default: '720'
+        type: string
+
+permissions:
+  contents: read
+
+# Prevent overlapping runs that could cause cache conflicts
+concurrency:
+  group: channel-digest-quant-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  TARGET_REPOS: '["SimplifyJobs/Summer2026-Internships","vanshb03/Summer2026-Internships"]'
+  LISTINGS_PATH: '.github/scripts/listings.json'
+  DATE_FIELD: 'date_posted'
+  DATE_FALLBACK: 'date_updated'
+  WINDOW_HOURS: '24'
+  SEEN_TTL_DAYS: '14'
+  STATE_DIR: '.state/channel-digest-quant'
+  DIGEST_CATEGORIES: '["Quantitative Finance"]'
+  FILTER_GRADUATE_DEGREES: 'false'  # Allow all degree levels
+
+jobs:
+  digest:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: '3.11' }
+      - run: pip install requests
+
+      # Compute weekly cache key component (ISO year-week)
+      - name: Compute ISO week key
+        run: echo "ISO_WEEK=$(date -u +'%G-W%V')" >> $GITHUB_ENV
+
+      # Use separate cache for quant digest TTL state
+      - name: Restore quant digest state
+        id: cache-restore
+        uses: actions/cache/restore@v4
+        with:
+          path: .state/channel-digest-quant
+          key: channel-digest-quant-state-v1-${{ env.ISO_WEEK }}-${{ github.run_id }}
+          restore-keys: |
+            channel-digest-quant-state-v1-${{ env.ISO_WEEK }}-
+            channel-digest-quant-state-v1-
+
+      - name: Run ${{ env.WINDOW_HOURS }}h quant digest
+        if: github.event_name == 'schedule' || github.event.inputs.command == 'digest'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID_CHANNEL_QUANT }}
+          TARGET_REPOS: ${{ env.TARGET_REPOS }}
+          LISTINGS_PATH: ${{ env.LISTINGS_PATH }}
+          DATE_FIELD: ${{ env.DATE_FIELD }}
+          DATE_FALLBACK: ${{ env.DATE_FALLBACK }}
+          WINDOW_HOURS: ${{ env.WINDOW_HOURS }}
+          SEEN_TTL_DAYS: ${{ env.SEEN_TTL_DAYS }}
+          COUNT: ${{ github.event.inputs.count || '100' }}
+          STATE_DIR: ${{ env.STATE_DIR }}
+          FORCE_WINDOW_HOURS: ${{ github.event.inputs.force_window_hours }}
+          DIGEST_CATEGORIES: ${{ env.DIGEST_CATEGORIES }}
+          FILTER_GRADUATE_DEGREES: ${{ env.FILTER_GRADUATE_DEGREES }}
+        run: python .github/scripts/send_digest_multi.py
+
+      # Save quant digest TTL state
+      - name: Save quant digest state
+        if: always()
+        uses: actions/cache/save@v4
+        with:
+          path: .state/channel-digest-quant
+          key: channel-digest-quant-state-v1-${{ env.ISO_WEEK }}-${{ github.run_id }}
