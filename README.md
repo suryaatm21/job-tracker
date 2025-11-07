@@ -4,7 +4,17 @@ A Telegram bot that monitors multiple GitHub repositories for new internship lis
 
 ---
 
-👉 [Get it at resources.theuntab.com](https://resources.theuntab.com)
+## � Join Our Telegram Channels
+
+Get instant notifications for new internship listings:
+
+- **[Software Engineering (BS/MS)](https://t.me/summer2026swe)** - SWE & Data Science/ML roles for undergrads
+- **[Research Positions (PhD)](https://t.me/+ZuXr_V9z_zxkMWJh)** - Advanced degree roles across all categories
+- **[Quantitative Finance](https://t.me/+pDThZ4kSNWJjYWQx)** - Quant trading & research positions
+- **[Product Management](https://t.me/+YI4tz_OmJGBkOGIx)** - PM & TPM roles
+- **[Hardware Engineering](https://t.me/+EZqI8-k2dls2ZmEx)** - Hardware, embedded systems, FPGA roles
+
+More resources: [resources.theuntab.com](https://resources.theuntab.com)
 
 ---
 
@@ -55,13 +65,18 @@ Environment variables in workflows:
 
 - **State files**: Each workflow writes its own state under `.state/<workflow>`
   - DM watcher: `.state/dm-watcher`
-  - Channel digest: `.state/channel-digest`
+  - Channel digest (SWE/ML BS): `.state/channel-digest`
   - Channel digest testing: `.state/channel-digest-testing`
+  - Hardware digest: `.state/channel-digest-hardware`
+  - Quant digest: `.state/channel-digest-quant`
+  - PM digest: `.state/channel-digest-pm`
+  - PhD digest: `.state/channel-digest-phd`
 - **Why weekly keys**: GitHub Actions caches are immutable. To persist evolving state mid‑week, we use per‑run keys with a weekly prefix and rely on `restore-keys` to load the latest one.
 - **Key format**:
   - `dm-watcher-state-v1-<ISO_WEEK>-<run_id>`
   - `channel-digest-state-v1-<ISO_WEEK>-<run_id>`
   - `channel-digest-testing-state-v1-<ISO_WEEK>-<run_id>`
+  - `channel-digest-{hardware,quant,pm,phd}-state-v1-<ISO_WEEK>-<run_id>`
 - **Restore strategy**: Prefer the newest cache for the current ISO week, then fall back to earlier weeks via `restore-keys`.
 - **Save strategy**: Always save a new cache at the end of a run (immutable), then prune old caches with a cleanup workflow (below).
 - For TTL details, see `docs/TTL_IMPLEMENTATION.md`.
@@ -99,7 +114,7 @@ Note on reopen/grace window: the watcher uses a short "reopen" grace window (def
 - **Schedule**: Daily at 08:00 UTC; also supports manual runs (`workflow_dispatch`).
 - **Purpose**: Prune immutable caches to keep only the newest N per managed prefix and delete non‑matching caches.
 - **Defaults**:
-  - Keep prefixes: `dm-watcher-state-v1, channel-digest-state-v1, channel-digest-testing-state-v1`
+  - Keep prefixes: `dm-watcher-state-v1, channel-digest-state-v1, channel-digest-testing-state-v1, channel-digest-hardware-state-v1, channel-digest-quant-state-v1, channel-digest-pm-state-v1, channel-digest-phd-state-v1`
   - Keep N per prefix: `3`
 - **Manual inputs**:
   - `dry_run` (true/false): list without deleting
