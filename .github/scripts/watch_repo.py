@@ -251,9 +251,8 @@ def main():
     if final_entries:
         # Sort final entries by company name alphabetically, then by timestamp desc
         final_entries.sort(key=lambda x: (x["line"].split(" — ")[0].replace("• ", "").lower(), -x["ts"]))
-        lines = [entry["line"] for entry in final_entries[:10]]
-        
         header = f"🔔 DM Alert: New internships detected ({len(final_entries)})"
+        lines = [entry["line"] for entry in final_entries]
         message = "\n".join([header] + lines)
         
         debug_log(f"[SEND] Sending message with {len(lines)} lines, ttl_allowed={len(final_entries)}")
