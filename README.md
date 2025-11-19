@@ -48,6 +48,8 @@ More resources: [resources.theuntab.com](https://resources.theuntab.com)
 
 ## Configuration
 
+Set these in your GitHub Actions secrets. For a step-by-step guide, see [docs/GITHUB_SECRETS_SETUP.md](docs/GITHUB_SECRETS_SETUP.md).
+
 Set these in your GitHub Actions secrets:
 
 - `TELEGRAM_BOT_TOKEN` – Bot token from BotFather.
@@ -101,7 +103,7 @@ Note on reopen/grace window: the watcher uses a short "reopen" grace window (def
 
 - **Schedule**: Staggered (every 2-6 hours)
 - **Purpose**: Role-specific and degree-level batched summaries
-- **Features**: Category filtering, degree-level filtering, 24-hour windows
+- **Features**: Category filtering, degree-level filtering, 24-hour windows. See [docs/CANONICAL_CATEGORIES.md](docs/CANONICAL_CATEGORIES.md) for category details.
 
 ### Channel Digest Testing (`.github/workflows/channel-digest-testing.yml`)
 
@@ -199,6 +201,10 @@ Note on reopen/grace window: the watcher uses a short "reopen" grace window (def
 
 - Each workflow uses separate state directories (`.state/dm-watcher`, `.state/channel-digest`)
 - Each has unique cache keys to prevent conflicts
+
+## Manual Testing
+
+For a detailed testing guide, see [docs/TESTING.md](docs/TESTING.md).
 
 ## Manual Testing
 
