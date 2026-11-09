@@ -33,7 +33,7 @@ import pathlib
 import re
 import sys
 import time
-from collections import defaultdict, OrderedDict
+from collections import defaultdict
 
 import requests
 
@@ -242,11 +242,6 @@ def listing_epoch(item):
 
 def _title_key(item):
     return re.sub(r"[^a-z0-9]+", " ", (item.get("title") or "").lower()).strip()
-
-
-def _company_title_key(item):
-    """Cross-source duplicate key: exact normalized company plus normalized title."""
-    return ("company_title", normalize_company(item.get("company_name")), _title_key(item))
 
 
 def listing_keys(item):
