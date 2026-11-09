@@ -37,7 +37,7 @@ from collections import defaultdict, OrderedDict
 
 import requests
 
-from github_helper import debug_log, fetch_file_content, gh_get, GH
+from github_helper import debug_log, fetch_file_content, fetch_file_json, gh_get, GH
 from repo_utils import get_default_branch, fetch_listings, DEFAULT_LISTINGS_PATH
 from dedup_utils import get_dedup_key, get_primary_url
 from state_utils import (load_seen, save_seen, should_alert_item, get_cache_key,
@@ -120,7 +120,10 @@ def read_listings_json(source, now_epoch):
     """
     if source.get("path"):
         _require_file(source)
-    data = fetch_listings(source["repo"], source.get("path") or DEFAULT_LISTINGS_PATH)
+        repo = source["repo"]
+        data = fetch_file_json(repo, source["path"], ref=get_default_branch(repo))
+    else:
+        data = fetch_listings(source["repo"], DEFAULT_LISTINGS_PATH)
     return data if isinstance(data, list) else []
 
 
