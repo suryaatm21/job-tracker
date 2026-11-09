@@ -1,0 +1,126 @@
+{
+  "_about": "Private opportunity digest (send_private_digest.py). Hard gates: location (metros below) and, only when a listing states pay, the pay floor. Scoring then decides 'strong signal' vs 'maybe'; it never drops a listing. Company tiers live in company_tiers.json.",
+
+  "sources": [
+    {"name": "SimplifyJobs/New-Grad-Positions", "type": "listings_json", "repo": "SimplifyJobs/New-Grad-Positions", "level": "new_grad"},
+    {"name": "SimplifyJobs/Summer2027-Internships", "type": "listings_json", "repo": "SimplifyJobs/Summer2027-Internships", "level": "intern"},
+    {"name": "vanshb03/Summer2027-Internships", "type": "listings_json", "repo": "vanshb03/Summer2027-Internships", "level": "intern"},
+    {"name": "speedyapply intern USA", "type": "markdown_tables", "repo": "speedyapply/2027-SWE-College-Jobs", "path": "README.md", "level": "intern"},
+    {"name": "speedyapply intern intl", "type": "markdown_tables", "repo": "speedyapply/2027-SWE-College-Jobs", "path": "INTERN_INTL.md", "level": "intern"},
+    {"name": "speedyapply new grad USA", "type": "markdown_tables", "repo": "speedyapply/2027-SWE-College-Jobs", "path": "NEW_GRAD_USA.md", "level": "new_grad"},
+    {"name": "speedyapply new grad intl", "type": "markdown_tables", "repo": "speedyapply/2027-SWE-College-Jobs", "path": "NEW_GRAD_INTL.md", "level": "new_grad"},
+    {"name": "zapplyjobs/New-Grad-Jobs-2027", "type": "markdown_tables", "repo": "zapplyjobs/New-Grad-Jobs-2027", "path": "README.md", "level": "new_grad"},
+    {"name": "instagram:zero2sudo", "type": "listings_json", "repo": "Supra16/JobTracker", "path": "feed/listings.json", "level": "unknown", "optional": true,
+     "_about": "Supra's Instagram Stories monitor. Each entry may carry level 'new grad' or 'intern' from his classifier; otherwise the title decides, else it is posted under 'Level unknown'. Skipped with one log line while the file does not exist."}
+  ],
+
+  "location": {
+    "include_remote": false,
+    "remote_patterns": ["\\bremote\\b", "\\bteleworker\\b", "\\bwork from home\\b"],
+    "filler_tokens": ["usa", "us", "u.s.", "u.s.a.", "united", "states", "of", "america", "hybrid", "onsite", "on-site", "in", "office", "area", "metro", "greater", "city"],
+    "metros": [
+      {
+        "label": "SF Bay Area",
+        "cities": [
+          "san francisco", "south san francisco", "sf", "south sf", "sf bay area", "bay area", "silicon valley",
+          "palo alto", "east palo alto", "mountain view", "menlo park", "sunnyvale", "cupertino", "redwood city",
+          "redwood shores", "san mateo", "foster city", "burlingame", "san bruno", "millbrae", "emeryville",
+          "milpitas", "los altos", "los gatos", "walnut creek", "san ramon"
+        ],
+        "cities_needing_state": [
+          "san jose", "santa clara", "oakland", "berkeley", "fremont", "newark", "hayward", "pleasanton",
+          "livermore", "dublin", "san carlos", "belmont", "campbell", "alameda", "union city", "daly city",
+          "san leandro", "brisbane", "saratoga", "half moon bay", "san rafael", "sausalito", "mill valley", "novato"
+        ],
+        "state_tokens": ["ca", "california"]
+      },
+      {
+        "label": "NYC",
+        "cities": ["new york city", "nyc", "long island city", "the bronx", "staten island"],
+        "cities_needing_state": ["new york", "manhattan", "brooklyn", "queens", "bronx"],
+        "state_tokens": ["ny", "new york"]
+      },
+      {
+        "label": "Los Angeles",
+        "cities": [
+          "los angeles", "east los angeles", "santa monica", "culver city", "el segundo", "playa vista",
+          "marina del rey", "beverly hills", "west hollywood", "north hollywood", "manhattan beach",
+          "redondo beach", "hermosa beach", "calabasas", "thousand oaks", "woodland hills", "sherman oaks",
+          "studio city", "van nuys", "encino", "tarzana", "northridge", "santa clarita", "torrance", "irvine",
+          "costa mesa", "newport beach", "santa ana", "huntington beach", "anaheim", "fullerton",
+          "aliso viejo", "mission viejo", "tustin", "la mirada", "seal beach", "brea", "universal city"
+        ],
+        "cities_needing_state": [
+          "pasadena", "burbank", "glendale", "long beach", "hawthorne", "carson", "venice", "hollywood",
+          "inglewood", "gardena", "downey", "whittier", "lakewood", "lake forest", "orange county", "orange"
+        ],
+        "bare_names": ["la", "l.a."],
+        "state_tokens": ["ca", "california"]
+      },
+      {
+        "label": "Austin",
+        "cities": ["round rock", "pflugerville", "cedar park", "leander", "bee cave"],
+        "cities_needing_state": ["austin", "georgetown", "san marcos", "kyle", "buda"],
+        "bare_names": ["atx"],
+        "state_tokens": ["tx", "texas"]
+      },
+      {
+        "label": "Miami",
+        "cities": [
+          "miami beach", "miami gardens", "north miami", "fort lauderdale", "ft lauderdale", "coral gables",
+          "boca raton", "west palm beach", "palm beach gardens", "aventura", "hialeah", "brickell",
+          "wynwood", "pompano beach", "delray beach", "deerfield beach", "boynton beach"
+        ],
+        "cities_needing_state": ["miami", "doral", "hollywood", "palm beach", "sunrise", "plantation", "jupiter"],
+        "state_tokens": ["fl", "florida"]
+      }
+    ]
+  },
+
+  "pay_gate": {
+    "_about": "Hard gate, applied only when a listing states pay; listings without pay, or with pay that cannot be parsed, pass to scoring. New grads are compared on the top of the posted yearly range (posted ranges are base only, no equity); interns on the hourly rate. Yearly and hourly convert at hours_per_year.",
+    "enabled": true,
+    "new_grad_min_yearly_usd": 140000,
+    "intern_min_hourly_usd": 50,
+    "hours_per_year": 2080
+  },
+
+  "scoring": {
+    "strong_threshold": 3,
+    "graduate_only_points": -6,
+    "off_target_categories": {
+      "_about": "Board sections that are not engineering/product roles (zapply's README mixes in sales, nursing, legal). Exact section names; speedyapply's 'Other' means 'other companies' and is not listed.",
+      "categories": ["Business & Operations", "Other Jobs"],
+      "points": -3
+    },
+    "funding": {
+      "_about": "From each company's Simplify profile. Equity rounds only (debt, grants, secondaries and post-IPO rounds do not count); public companies get no funding points.",
+      "equity_round_prefixes": ["PRE_SEED", "SEED", "ANGEL", "SERIES_", "EARLY_VC", "LATE_VC", "GROWTH_EQUITY", "CONVERTIBLE", "CORPORATE_ROUND"],
+      "recent_round_months": 12,
+      "recent_round_points": 2,
+      "large_round_usd": 50000000,
+      "large_round_points": 1,
+      "top_investor_months": 36,
+      "top_investor_points": 1,
+      "large_total_usd": 500000000,
+      "large_total_points": 1
+    },
+    "posted_pay": {
+      "_about": "Bars are the boards' own Microsoft/NVIDIA figures: speedyapply lists NVIDIA new grad at $172k/yr and Microsoft interns at $52/hr (NVIDIA $62/hr), checked 2026-11-08.",
+      "new_grad_yearly_usd": 170000,
+      "intern_hourly_usd": 52,
+      "points": 3
+    }
+  },
+
+  "company_profiles": {
+    "refresh_days": 14,
+    "max_lookups_per_run": 60,
+    "delay_seconds": 0.5
+  },
+
+  "digest": {
+    "max_strong_per_level": 40,
+    "max_maybe_per_level": 25
+  }
+}

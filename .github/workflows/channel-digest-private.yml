@@ -1,0 +1,74 @@
+name: Channel Digest (Private - Job Tracker)
+
+# New grad + intern listings in SF Bay Area, NYC, Los Angeles, Austin and Miami,
+# scored by company signals. Posts only to the repurposed "job tracker" channel
+# (secret TELEGRAM_CHAT_ID_CHANNEL_SWE_ML_PHD). Config: .github/private_channel/.
+
+on:
+  schedule:
+    - cron: '20 */2 * * *'  # Every 2 hours at :20
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: 'Dry run: log counts and rendered messages, send nothing'
+        required: false
+        default: 'true'
+        type: choice
+        options: ['true', 'false']
+      force_window_hours:
+        description: 'Override WINDOW_HOURS (e.g. 168 for a week); blank keeps the default'
+        required: false
+        default: ''
+        type: string
+
+permissions:
+  contents: read
+
+# Prevent overlapping runs that could cause cache conflicts
+concurrency:
+  group: channel-digest-private-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  WINDOW_HOURS: '48'
+  SEEN_TTL_DAYS: '14'
+  STATE_DIR: '.state/channel-digest-private'
+
+jobs:
+  digest:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: '3.11' }
+      - run: pip install requests
+
+      # Compute weekly cache key component (ISO year-week)
+      - name: Compute ISO week key
+        run: echo "ISO_WEEK=$(date -u +'%G-W%V')" >> $GITHUB_ENV
+
+      # TTL state (seen.json) and the Simplify company-profile cache
+      - name: Restore private digest state
+        uses: actions/cache/restore@v4
+        with:
+          path: .state/channel-digest-private
+          key: channel-digest-private-state-v1-${{ env.ISO_WEEK }}-${{ github.run_id }}
+          restore-keys: |
+            channel-digest-private-state-v1-${{ env.ISO_WEEK }}-
+            channel-digest-private-state-v1-
+
+      - name: Run private digest
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          PRIVATE_DIGEST_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID_CHANNEL_SWE_ML_PHD }}
+          DRY_RUN: ${{ github.event.inputs.dry_run || 'false' }}
+          FORCE_WINDOW_HOURS: ${{ github.event.inputs.force_window_hours }}
+        run: python .github/scripts/send_private_digest.py
+
+      - name: Save private digest state
+        if: always()
+        uses: actions/cache/save@v4
+        with:
+          path: .state/channel-digest-private
+          key: channel-digest-private-state-v1-${{ env.ISO_WEEK }}-${{ github.run_id }}

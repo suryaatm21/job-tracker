@@ -1,0 +1,65 @@
+{
+  "_about": [
+    "Soft signal for the private digest: a listed company gets the tier's points and label. A company on no list is never dropped for that reason.",
+    "Matching is exact on the normalized name or an alias (case, punctuation and Inc/LLC/Corp suffixes ignored), never a substring, so add every spelling the boards use to 'aliases'.",
+    "The bar is Microsoft/NVIDIA new-grad compensation. Comp figures come from speedyapply's Salary column (https://github.com/speedyapply/2027-SWE-College-Jobs, NEW_GRAD_USA.md and README.md, read 2026-11-08), which lists one figure per company: NVIDIA new grad $172k/yr, Microsoft intern $52/hr, NVIDIA intern $62/hr.",
+    "levels.fyi figures marked 'verified' were read on 2026-11-08; levels.fyi blocked further requests that day, so other levels.fyi links are unverified pointers."
+  ],
+  "tiers": [
+    {
+      "key": "big_tech",
+      "label": "big tech",
+      "points": 4,
+      "description": "Big tech at or above the Microsoft/NVIDIA new-grad bar.",
+      "companies": [
+        {"name": "Microsoft", "aliases": ["Microsoft Corporation"], "reason": "The bar itself; listed so equal-bar roles still surface.", "source": "https://github.com/speedyapply/2027-SWE-College-Jobs/blob/main/README.md (intern $52/hr)"},
+        {"name": "LinkedIn", "aliases": [], "reason": "Microsoft subsidiary on the same bar.", "source": "https://www.levels.fyi/companies/linkedin/salaries/software-engineer (unverified)"},
+        {"name": "NVIDIA", "aliases": ["Nvidia Corporation"], "reason": "The bar itself; levels.fyi IC1 (entry) median total comp $185K.", "source": "https://www.levels.fyi/companies/nvidia/salaries/software-engineer (verified 2026-11-08)"},
+        {"name": "Google", "aliases": ["Alphabet", "Google DeepMind", "DeepMind", "YouTube", "Google LLC"], "reason": "levels.fyi L3 (entry) median total comp $207K, above NVIDIA IC1; speedyapply new grad $196k/yr.", "source": "https://www.levels.fyi/companies/google/salaries/software-engineer (verified 2026-11-08)"},
+        {"name": "Waymo", "aliases": [], "reason": "Alphabet company hiring new grads in the Bay Area.", "source": "https://www.levels.fyi/companies/waymo/salaries/software-engineer (unverified)"},
+        {"name": "Meta", "aliases": ["Facebook", "Meta Platforms"], "reason": "FAANG. speedyapply intern $50/hr sits just under Microsoft's $52/hr; new-grad E3 level unverified, so review this entry.", "source": "https://www.levels.fyi/companies/facebook/salaries/software-engineer (unverified)"},
+        {"name": "Apple", "aliases": ["Apple Inc"], "reason": "FAANG; no posted figure on the boards.", "source": "https://www.levels.fyi/companies/apple/salaries/software-engineer (unverified)"},
+        {"name": "Amazon", "aliases": ["Amazon Web Services", "AWS", "Amazon.com Services", "Amazon.com", "Annapurna Labs", "Annapurna Labs (U.S.)"], "reason": "speedyapply new grad $186k/yr, above NVIDIA's $172k/yr on the same board.", "source": "https://github.com/speedyapply/2027-SWE-College-Jobs/blob/main/NEW_GRAD_USA.md"},
+        {"name": "TikTok", "aliases": ["ByteDance"], "reason": "speedyapply new grad $202k/yr, above NVIDIA's $172k/yr.", "source": "https://github.com/speedyapply/2027-SWE-College-Jobs/blob/main/NEW_GRAD_USA.md"}
+      ]
+    },
+    {
+      "key": "startup",
+      "label": "promising startup",
+      "points": 3,
+      "description": "Private companies with recent large rounds and strong new-grad demand. Funding facts are from each company's Simplify page, which the digest also reads live, so unlisted startups earn points the same way.",
+      "companies": [
+        {"name": "OpenAI", "aliases": [], "reason": "Raised $11B late-stage round Nov 2026; speedyapply new grad $242k/yr.", "source": "https://simplify.jobs/c/OpenAI"},
+        {"name": "Anthropic", "aliases": [], "reason": "Raised $42B convertible round Oct 2026.", "source": "https://simplify.jobs/c/Anthropic"},
+        {"name": "Databricks", "aliases": [], "reason": "Raised $5B late-stage round Aug 2026 (a16z, Coatue, Insight).", "source": "https://simplify.jobs/c/Databricks"},
+        {"name": "Stripe", "aliases": [], "reason": "$8.7B raised; speedyapply new grad $207k/yr.", "source": "https://simplify.jobs/c/Stripe"},
+        {"name": "Ramp", "aliases": [], "reason": "Raised $1.85B growth round Oct 2026 (Founders Fund); speedyapply intern $60/hr.", "source": "https://simplify.jobs/c/Ramp"},
+        {"name": "Anduril", "aliases": ["Anduril Industries"], "reason": "Raised $5B Series H May 2026 (a16z).", "source": "https://simplify.jobs/c/Anduril"},
+        {"name": "Scale AI", "aliases": ["Scale"], "reason": "Meta bought a 49% stake for $14.3B in Jun 2025.", "source": "https://simplify.jobs/c/Scale-AI"},
+        {"name": "Notion", "aliases": ["Notion Labs"], "reason": "Late-stage, NYC and SF engineering hubs; Jan 2026 secondary.", "source": "https://simplify.jobs/c/Notion"}
+      ]
+    },
+    {
+      "key": "comp",
+      "label": "comp ≥ MSFT/NVIDIA",
+      "points": 3,
+      "description": "New-grad pay comparable to or above Microsoft/NVIDIA: speedyapply new-grad figure at least NVIDIA's $172k/yr, or, with no new-grad figure, intern pay at least Microsoft's $52/hr.",
+      "companies": [
+        {"name": "Hudson River Trading", "aliases": ["HRT"], "reason": "speedyapply new grad $412k/yr.", "source": "https://github.com/speedyapply/2027-SWE-College-Jobs/blob/main/NEW_GRAD_USA.md"},
+        {"name": "Five Rings", "aliases": ["Five Rings Capital"], "reason": "speedyapply new grad $381k/yr.", "source": "https://github.com/speedyapply/2027-SWE-College-Jobs/blob/main/NEW_GRAD_USA.md"},
+        {"name": "Citadel", "aliases": ["Citadel LLC"], "reason": "speedyapply new grad $338k/yr.", "source": "https://github.com/speedyapply/2027-SWE-College-Jobs/blob/main/NEW_GRAD_USA.md"},
+        {"name": "Citadel Securities", "aliases": [], "reason": "speedyapply new grad $338k/yr.", "source": "https://github.com/speedyapply/2027-SWE-College-Jobs/blob/main/NEW_GRAD_USA.md"},
+        {"name": "Jane Street", "aliases": ["Jane Street Capital"], "reason": "Top-paying quant firm; no board figure, so review.", "source": "https://www.levels.fyi/companies/jane-street/salaries/software-engineer (unverified)"},
+        {"name": "Akuna Capital", "aliases": ["Akuna"], "reason": "speedyapply new grad $191k/yr.", "source": "https://github.com/speedyapply/2027-SWE-College-Jobs/blob/main/NEW_GRAD_USA.md"},
+        {"name": "Snap", "aliases": ["Snapchat"], "reason": "speedyapply new grad $195k/yr.", "source": "https://github.com/speedyapply/2027-SWE-College-Jobs/blob/main/NEW_GRAD_USA.md"},
+        {"name": "Twitch", "aliases": ["Twitch Interactive"], "reason": "speedyapply new grad $193k/yr.", "source": "https://github.com/speedyapply/2027-SWE-College-Jobs/blob/main/NEW_GRAD_USA.md"},
+        {"name": "Pinterest", "aliases": [], "reason": "speedyapply new grad $191k/yr.", "source": "https://github.com/speedyapply/2027-SWE-College-Jobs/blob/main/NEW_GRAD_USA.md"},
+        {"name": "Salesforce", "aliases": [], "reason": "speedyapply new grad $176k/yr.", "source": "https://github.com/speedyapply/2027-SWE-College-Jobs/blob/main/NEW_GRAD_USA.md"},
+        {"name": "Figma", "aliases": [], "reason": "speedyapply intern $60/hr (no new-grad figure).", "source": "https://github.com/speedyapply/2027-SWE-College-Jobs/blob/main/README.md"},
+        {"name": "Lyft", "aliases": [], "reason": "speedyapply intern $58/hr (no new-grad figure).", "source": "https://github.com/speedyapply/2027-SWE-College-Jobs/blob/main/README.md"},
+        {"name": "DoorDash", "aliases": [], "reason": "speedyapply intern $55/hr (no new-grad figure).", "source": "https://github.com/speedyapply/2027-SWE-College-Jobs/blob/main/README.md"},
+        {"name": "Datadog", "aliases": [], "reason": "speedyapply intern $52/hr, equal to Microsoft (no new-grad figure).", "source": "https://github.com/speedyapply/2027-SWE-College-Jobs/blob/main/README.md"}
+      ]
+    }
+  ]
+}
