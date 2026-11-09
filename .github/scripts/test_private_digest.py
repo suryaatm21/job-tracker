@@ -102,9 +102,11 @@ class LevelTest(unittest.TestCase):
 
     def test_graduate_only(self):
         self.assertTrue(is_graduate_only({"title": "Research Intern - PhD"}))
-        self.assertTrue(is_graduate_only({"title": "SWE", "degrees": ["Master's", "PhD"]}))
-        self.assertFalse(is_graduate_only({"title": "SWE", "degrees": ["Bachelor's", "Master's"]}))
-        self.assertFalse(is_graduate_only({"title": "SWE", "degrees": []}))
+        for degrees in (["PhD"], ["Master's", "PhD"], ["MBA"]):
+            self.assertTrue(is_graduate_only({"title": "SWE", "degrees": degrees}), degrees)
+        for degrees in (["Bachelor's"], ["Bachelor's", "Master's"], ["Associate's"], ["Certificate"],
+                        ["Bootcamp"], ["Incomplete"], ["Master's", "PhD", "Certificate"], []):
+            self.assertFalse(is_graduate_only({"title": "SWE", "degrees": degrees}), degrees)
 
 
 class LocationTest(unittest.TestCase):
@@ -328,13 +330,14 @@ class CircuitBreakerTest(unittest.TestCase):
 
 
 class DedupTest(unittest.TestCase):
-    def test_company_title_merges_only_name_prefixes(self):
+    def test_company_title_merges_only_exact_normalized_names(self):
         def job(company, title, url):
             return {"company_name": company, "title": title, "url": url, "_source": "s", "_level": LEVEL_INTERN}
 
         items = [
             job("Varda", "Site Reliability Internship", "https://a.test/1"),
             job("Varda Space", "Site Reliability Internship", "https://zapply.test/1"),
+            job("VARDA", "Site Reliability Internship", "https://b.test/1"),
             job("General Motors", "Software Engineering Intern", "https://gm.test/1"),
             job("General Dynamics", "Software Engineering Intern", "https://gd.test/1"),
             job("Other Name", "Different", "https://a.test/1"),  # same URL as the first: merged
@@ -342,7 +345,7 @@ class DedupTest(unittest.TestCase):
         funnel = digest.Funnel(["s"])
         groups = digest.dedup_groups(items, funnel)
         self.assertEqual([(g[0]["company_name"], len(g[1])) for g in groups],
-                         [("Varda", 2), ("General Motors", 0), ("General Dynamics", 0)])
+                         [("Varda", 1), ("Varda Space", 0), ("General Motors", 0), ("General Dynamics", 0)])
         self.assertEqual(funnel.drops["dedup:company_title"][LEVEL_INTERN], 1)
         self.assertEqual(funnel.drops["dedup:url"][LEVEL_INTERN], 1)
 

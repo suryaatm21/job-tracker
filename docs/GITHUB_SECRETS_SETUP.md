@@ -53,7 +53,7 @@ Add these 5 new secrets to enable the multi-channel digest workflows:
 
 - **No new secret.** The workflow maps `TELEGRAM_CHAT_ID_CHANNEL_SWE_ML_PHD` to the script's `PRIVATE_DIGEST_CHAT_ID` and never reads `TELEGRAM_CHAT_ID` (the DM chat) or the public channel secrets.
 - **Bot access.** The bot is already an admin of that channel, so nothing changes in Telegram except the name.
-- **Privacy.** The channel was public-facing: existing subscribers stay subscribed and its invite link was published in the README. If the digest should be private, revoke the old invite link and remove other subscribers in Telegram (channel settings → Invite Links / Subscribers).
+- **Privacy.** The channel owner has made the repurposed channel private: the old invite link is revoked and the channel is private now.
 - **If the secret is missing**, the private digest logs a warning and exits successfully without sending.
 
 ---

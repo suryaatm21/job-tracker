@@ -58,15 +58,15 @@ def tag_level(item, default_level):
 
 
 # Simplify's degrees field lists accepted degrees; these mean a BS student qualifies
-_UNDERGRAD_DEGREES = {"bachelor's", "associate's"}
+_GRADUATE_DEGREES = {"master's", "phd", "mba", "md", "jd", "pharmd", "do", "dds", "dvm"}
 
 
 def is_graduate_only(item):
-    """True for PhD/MS-only roles: title says so, or degrees lists no undergrad degree."""
+    """True for PhD/MS-only roles: title says so, or every listed degree is a graduate degree."""
     if requires_graduate_degree(item):
         return True
     degrees = [str(d).strip().lower() for d in (item.get("degrees") or []) if str(d).strip()]
-    return bool(degrees) and not any(d in _UNDERGRAD_DEGREES for d in degrees)
+    return bool(degrees) and all(d in _GRADUATE_DEGREES for d in degrees)
 
 
 # ---------------------------------------------------------------------------

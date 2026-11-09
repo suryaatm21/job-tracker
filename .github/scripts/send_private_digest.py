@@ -245,34 +245,21 @@ def _title_key(item):
 
 
 def _company_title_key(item):
-    """
-    Cross-source duplicate bucket: first word of the normalized company plus the
-    normalized title. Boards spell companies differently ("Astranis" vs
-    "Astranis Space Technologies", "Varda" vs "Varda Space").
-    """
-    company = normalize_company(item.get("company_name")).split()
-    return ("company_title", company[0] if company else "", _title_key(item))
-
-
-def _same_company(a, b):
-    """True when one normalized name is a word-prefix of the other ("varda" / "varda space"),
-    so "General Motors" and "General Dynamics" never merge on a shared generic title."""
-    a, b = normalize_company(a).split(), normalize_company(b).split()
-    shorter, longer = (a, b) if len(a) <= len(b) else (b, a)
-    return bool(shorter) and longer[:len(shorter)] == shorter
+    """Cross-source duplicate key: exact normalized company plus normalized title."""
+    return ("company_title", normalize_company(item.get("company_name")), _title_key(item))
 
 
 def dedup_groups(items, funnel):
     """
     Collapse duplicates within this run. First by the shared URL/id key, then by
-    company+title so the same job reached through a redirect or short link
+    normalized company + title so the same job reached through a redirect or short link
     (zapply.jobs, go.vansh.nyc) is posted once. Earlier sources win the display
     slot; scoring reads signals from every member.
     Returns [(kept_item, [duplicates...])].
     """
     groups = OrderedDict()
     by_url = {}
-    by_company_title = defaultdict(list)  # bucket -> [(company_name, group id)]
+    by_company_title = {}
     for item in items:
         url_key = get_dedup_key(item)
         ct_key = _company_title_key(item)
@@ -280,8 +267,7 @@ def dedup_groups(items, funnel):
         reason = "dedup:url"
         if hit is None:
             reason = "dedup:company_title"
-            hit = next((gid for name, gid in by_company_title[ct_key]
-                        if _same_company(name, item.get("company_name"))), None)
+            hit = by_company_title.get(ct_key)
         if hit is not None:
             groups[hit][1].append(item)
             funnel.drop(reason, item)
@@ -290,7 +276,7 @@ def dedup_groups(items, funnel):
         groups[gid] = (item, [])
         if url_key:
             by_url[url_key] = gid
-        by_company_title[ct_key].append((item.get("company_name"), gid))
+        by_company_title[ct_key] = gid
         funnel.keep("dedup", item)
     return list(groups.values())
 
