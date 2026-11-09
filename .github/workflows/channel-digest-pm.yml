@@ -31,7 +31,7 @@ concurrency:
   cancel-in-progress: false
 
 env:
-  TARGET_REPOS: '["SimplifyJobs/Summer2026-Internships","vanshb03/Summer2026-Internships"]'
+  TARGET_REPOS: '["SimplifyJobs/Summer2027-Internships","vanshb03/Summer2027-Internships"]'
   LISTINGS_PATH: '.github/scripts/listings.json'
   DATE_FIELD: 'date_posted'
   DATE_FALLBACK: 'date_updated'
@@ -45,9 +45,9 @@ jobs:
   digest:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
-        with: { python-version: '3.11' }
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with: { python-version: '3.12' }
       - run: pip install requests
 
       # Compute weekly cache key component (ISO year-week)
@@ -57,7 +57,7 @@ jobs:
       # Use separate cache for PM digest TTL state
       - name: Restore PM digest state
         id: cache-restore
-        uses: actions/cache/restore@v4
+        uses: actions/cache/restore@v6
         with:
           path: .state/channel-digest-pm
           key: channel-digest-pm-state-v1-${{ env.ISO_WEEK }}-${{ github.run_id }}
@@ -87,7 +87,7 @@ jobs:
       # Save PM digest TTL state
       - name: Save PM digest state
         if: always()
-        uses: actions/cache/save@v4
+        uses: actions/cache/save@v6
         with:
           path: .state/channel-digest-pm
           key: channel-digest-pm-state-v1-${{ env.ISO_WEEK }}-${{ github.run_id }}

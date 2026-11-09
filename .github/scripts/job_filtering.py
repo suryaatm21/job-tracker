@@ -38,6 +38,17 @@ SIMPLIFY_CATEGORY_MAPPING = {
     "Data Science, AI & Machine Learning": "Data Science, AI & Machine Learning"  # Already canonical
 }
 
+# Digest-only: Simplify's short labels for the role channels (hardware/PM/quant).
+# Kept out of SIMPLIFY_CATEGORY_MAPPING on purpose: classify_job_category() reads
+# that map for the DM filter, which accepts any category it returns, so adding
+# these there would start sending hardware, PM and quant roles to DMs.
+DIGEST_ONLY_CATEGORY_MAPPING = {
+    "Hardware": "Hardware Engineering",
+    "Product": "Product Management",
+    "Quant": "Quantitative Finance",
+}
+DIGEST_CATEGORY_MAPPING = {**SIMPLIFY_CATEGORY_MAPPING, **DIGEST_ONLY_CATEGORY_MAPPING}
+
 
 # Category filtering: Only allow these categories for DM alerts (strict filtering)
 ALLOWED_CATEGORIES_DM = {
@@ -245,14 +256,14 @@ def is_allowed_category_for_digest(item, allowed_categories):
         classified = classify_job_category(item)
         return classified in allowed_categories if classified else False
     
-    # Map category to canonical form
-    canonical = SIMPLIFY_CATEGORY_MAPPING.get(cat)
+    # Map category to canonical form (digest map adds the role-channel short labels)
+    canonical = DIGEST_CATEGORY_MAPPING.get(cat)
     if canonical:
         return canonical in allowed_categories
     
     # Try case-insensitive match
     cat_lower = cat.lower()
-    for key, value in SIMPLIFY_CATEGORY_MAPPING.items():
+    for key, value in DIGEST_CATEGORY_MAPPING.items():
         if key.lower() == cat_lower:
             return value in allowed_categories
     

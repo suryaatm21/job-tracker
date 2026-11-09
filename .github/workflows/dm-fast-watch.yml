@@ -36,7 +36,7 @@ permissions:
   contents: read
 
 env:
-  TARGET_REPOS: '["SimplifyJobs/Summer2026-Internships","vanshb03/Summer2026-Internships"]'
+  TARGET_REPOS: '["SimplifyJobs/Summer2027-Internships","vanshb03/Summer2027-Internships"]'
   WATCH_PATHS: '["listings.json", ".github/scripts/listings.json"]'
   LISTINGS_PATH: '.github/scripts/listings.json'
   DATE_FIELD: 'date_posted'
@@ -50,9 +50,9 @@ jobs:
   watch:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
-        with: { python-version: '3.11' }
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with: { python-version: '3.12' }
       - run: pip install requests
 
       # Compute weekly cache key component (ISO year-week)
@@ -62,7 +62,7 @@ jobs:
       # Use separate cache for DM watcher state (commit SHAs + TTL cache)
       - name: Restore watcher state
         id: cache-restore
-        uses: actions/cache/restore@v4
+        uses: actions/cache/restore@v6
         with:
           path: .state/dm-watcher
           key: dm-watcher-state-v1-${{ env.ISO_WEEK }}-${{ github.run_id }}
@@ -84,7 +84,7 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
-          TARGET_REPO: 'vanshb03/Summer2026-Internships'
+          TARGET_REPO: 'vanshb03/Summer2027-Internships'
           LISTINGS_PATH: ${{ env.LISTINGS_PATH }}
           MESSAGE_PREFIX: '🔔 DM Alert'
         run: python .github/scripts/manual/send_latest_listing.py
@@ -95,7 +95,7 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
-          TARGET_REPO: 'vanshb03/Summer2026-Internships'
+          TARGET_REPO: 'vanshb03/Summer2027-Internships'
           LISTINGS_PATH: ${{ env.LISTINGS_PATH }}
           MESSAGE_PREFIX: '🔔 DM Alert'
         run: python .github/scripts/manual/send_todays_listings.py
@@ -106,7 +106,7 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
-          TARGET_REPO: 'vanshb03/Summer2026-Internships'
+          TARGET_REPO: 'vanshb03/Summer2027-Internships'
           LISTINGS_PATH: ${{ env.LISTINGS_PATH }}
           COUNT: ${{ github.event.inputs.count }}
           MESSAGE_PREFIX: '🔔 DM Alert'
@@ -133,7 +133,7 @@ jobs:
 
       - name: Save watcher state
         if: always()
-        uses: actions/cache/save@v4
+        uses: actions/cache/save@v6
         with:
           path: .state/dm-watcher
           key: dm-watcher-state-v1-${{ env.ISO_WEEK }}-${{ github.run_id }}

@@ -44,7 +44,7 @@ These are the **only** valid category names for digest workflows:
 # Single category
 DIGEST_CATEGORIES: '["Hardware Engineering"]'
 
-# Multiple categories (PhD channel)
+# Multiple categories
 DIGEST_CATEGORIES: '["Software Engineering","Data Science, AI & Machine Learning","Hardware Engineering","Quantitative Finance","Product Management"]'
 
 # SWE/ML channel
@@ -77,7 +77,6 @@ DIGEST_CATEGORIES: '["SWE","ML"]'
 | `channel-digest-hardware.yml` | "Hardware Engineering" |
 | `channel-digest-quant.yml` | "Quantitative Finance" |
 | `channel-digest-pm.yml` | "Product Management" |
-| `channel-digest-phd.yml` | All 5 canonical categories |
 
 ---
 
@@ -86,7 +85,7 @@ DIGEST_CATEGORIES: '["SWE","ML"]'
 The `is_allowed_category_for_digest()` function in `job_filtering.py`:
 
 1. Checks if job has a `category` field
-2. Maps it to canonical name using `SIMPLIFY_CATEGORY_MAPPING`
+2. Maps it to canonical name using `DIGEST_CATEGORY_MAPPING`: `SIMPLIFY_CATEGORY_MAPPING` plus the digest-only `DIGEST_ONLY_CATEGORY_MAPPING`, which maps Simplify's short role labels (`Hardware`, `Product`, `Quant`). Those short labels stay out of `SIMPLIFY_CATEGORY_MAPPING` because the DM filter accepts any category `classify_job_category()` returns. `test_category_routing.py` guards this.
 3. Compares against workflow's `DIGEST_CATEGORIES` list
 4. Returns `True` only on **exact match** (after canonicalization)
 
@@ -112,7 +111,7 @@ If you need to add a new category:
 
 1. **Update `job_filtering.py`:**
    - Add to `ALLOWED_CATEGORIES_DIGEST` set
-   - Add mapping variants to `SIMPLIFY_CATEGORY_MAPPING`
+   - Add mapping variants to `SIMPLIFY_CATEGORY_MAPPING` if DMs should get them too, otherwise to `DIGEST_ONLY_CATEGORY_MAPPING`
    - Update `classify_job_category()` if needed
 
 2. **Update workflow files:**

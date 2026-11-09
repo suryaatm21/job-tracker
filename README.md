@@ -9,7 +9,6 @@ A Telegram bot that monitors multiple GitHub repositories for new internship lis
 Get instant notifications for new internship listings:
 
 - **[Software Engineering (BS/MS)](https://t.me/summer2026swe)** - SWE & Data Science/ML roles for undergrads
-- **[Research Positions (PhD)](https://t.me/+ZuXr_V9z_zxkMWJh)** - Advanced degree roles across all categories
 - **[Quantitative Finance](https://t.me/+pDThZ4kSNWJjYWQx)** - Quant trading & research positions
 - **[Product Management](https://t.me/+YI4tz_OmJGBkOGIx)** - PM & TPM roles
 - **[Hardware Engineering](https://t.me/+EZqI8-k2dls2ZmEx)** - Hardware, embedded systems, FPGA roles
@@ -59,9 +58,10 @@ Set these in your GitHub Actions secrets:
 
 Environment variables in workflows:
 
-- `TARGET_REPOS` – JSON array of repositories: `["owner1/repo1", "owner2/repo2"]`
+- `TARGET_REPOS` – JSON array of repositories: `["owner1/repo1", "owner2/repo2"]`. Listings are read from each repo's actual default branch (both Summer2027-Internships repos use `dev`), resolved by `fetch_listings()` in `.github/scripts/repo_utils.py`.
 - `WINDOW_HOURS` – Time window for filtering (24 for all workflows to ensure reliable capture)
 - `SEEN_TTL_DAYS` – How long to remember alerted jobs (default 14; tune per workflow)
+- `DRY_RUN` – Set to `true` to print every Telegram message instead of sending it; the seen cache and last-seen SHAs are not saved. Not set in any workflow; see `docs/TESTING.md` for local dry runs.
 
 ### State & Caching (Immutable Actions Cache)
 
@@ -72,13 +72,12 @@ Environment variables in workflows:
   - Hardware digest: `.state/channel-digest-hardware`
   - Quant digest: `.state/channel-digest-quant`
   - PM digest: `.state/channel-digest-pm`
-  - PhD digest: `.state/channel-digest-phd`
 - **Why weekly keys**: GitHub Actions caches are immutable. To persist evolving state mid‑week, we use per‑run keys with a weekly prefix and rely on `restore-keys` to load the latest one.
 - **Key format**:
   - `dm-watcher-state-v1-<ISO_WEEK>-<run_id>`
   - `channel-digest-state-v1-<ISO_WEEK>-<run_id>`
   - `channel-digest-testing-state-v1-<ISO_WEEK>-<run_id>`
-  - `channel-digest-{hardware,quant,pm,phd}-state-v1-<ISO_WEEK>-<run_id>`
+  - `channel-digest-{hardware,quant,pm}-state-v1-<ISO_WEEK>-<run_id>`
 - **Restore strategy**: Prefer the newest cache for the current ISO week, then fall back to earlier weeks via `restore-keys`.
 - **Save strategy**: Always save a new cache at the end of a run (immutable), then prune old caches with a cleanup workflow (below).
 - For TTL details, see `docs/TTL_IMPLEMENTATION.md`.
@@ -99,11 +98,11 @@ Note on reopen/grace window: the watcher uses a short "reopen" grace window (def
 - **Purpose**: Batched summaries for SWE/ML Bachelor's positions
 - **Features**: HTML formatting, message batching, 24-hour window with TTL deduplication
 
-### Channel Digest - Hardware/Quant/PM/PhD (`.github/workflows/channel-digest-*.yml`)
+### Channel Digest - Hardware/Quant/PM (`.github/workflows/channel-digest-*.yml`)
 
 - **Schedule**: Staggered (every 2-6 hours)
-- **Purpose**: Role-specific and degree-level batched summaries
-- **Features**: Category filtering, degree-level filtering, 24-hour windows. See [docs/CANONICAL_CATEGORIES.md](docs/CANONICAL_CATEGORIES.md) for category details.
+- **Purpose**: Role-specific batched summaries (all degree levels)
+- **Features**: Category filtering, 24-hour windows. See [docs/CANONICAL_CATEGORIES.md](docs/CANONICAL_CATEGORIES.md) for category details.
 
 ### Channel Digest Testing (`.github/workflows/channel-digest-testing.yml`)
 
@@ -116,7 +115,7 @@ Note on reopen/grace window: the watcher uses a short "reopen" grace window (def
 - **Schedule**: Daily at 08:00 UTC; also supports manual runs (`workflow_dispatch`).
 - **Purpose**: Prune immutable caches to keep only the newest N per managed prefix and delete non‑matching caches.
 - **Defaults**:
-  - Keep prefixes: `dm-watcher-state-v1, channel-digest-state-v1, channel-digest-testing-state-v1, channel-digest-hardware-state-v1, channel-digest-quant-state-v1, channel-digest-pm-state-v1, channel-digest-phd-state-v1`
+  - Keep prefixes: `dm-watcher-state-v1, channel-digest-state-v1, channel-digest-testing-state-v1, channel-digest-hardware-state-v1, channel-digest-quant-state-v1, channel-digest-pm-state-v1`
   - Keep N per prefix: `3`
 - **Manual inputs**:
   - `dry_run` (true/false): list without deleting

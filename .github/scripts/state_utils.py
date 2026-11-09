@@ -100,7 +100,7 @@ def load_seen(path=".state/seen.json"):
         print(f"Warning: Failed to load seen cache from {path}: {e}")
         return {}
 
-def save_seen(seen, ttl_days, path=".state/seen.json", max_entries=200000):
+def save_seen(seen, ttl_days, path=".state/seen.json", max_entries=200000, dry_run=False):
     """
     Save seen cache to JSON file with TTL-based pruning.
     
@@ -109,7 +109,11 @@ def save_seen(seen, ttl_days, path=".state/seen.json", max_entries=200000):
         ttl_days: int, TTL in days for pruning old entries
         path: str, file path to save to
         max_entries: int, maximum entries to keep (sorted by most recent)
+        dry_run: bool, if True write nothing (a dry run must not mark unsent items as seen)
     """
+    if dry_run:
+        print(f"[DRY-RUN] Not saving seen cache ({len(seen)} entries) to {path}")
+        return
     try:
         # Ensure state directory exists
         seen_path = pathlib.Path(path)

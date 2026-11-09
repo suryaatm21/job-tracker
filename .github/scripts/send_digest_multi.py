@@ -12,6 +12,7 @@ Environment variables:
 - COUNT: Max items to include (default: "50")
 - GH_TOKEN: GitHub token for API access
 - TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID: Telegram credentials
+- DRY_RUN: "true" prints the digest instead of sending and leaves STATE_DIR untouched
 """
 import os
 import json
@@ -20,16 +21,16 @@ import time
 from datetime import datetime, timezone, timedelta
 
 # Utility imports
-from github_helper import fetch_file_json, debug_log
+from github_helper import debug_log
 from state_utils import load_seen, save_seen, should_alert_item, get_cache_key, format_epoch_for_log, should_include_item
 from format_utils import format_location, log_location_resolution, format_job_line
-from telegram_utils import batch_send_message
-from repo_utils import get_default_branch, detect_listings_path
+from telegram_utils import batch_send_message, is_dry_run
+from repo_utils import fetch_listings
 from dedup_utils import get_dedup_key, get_primary_url, get_unified_season
 from job_filtering import should_process_digest_item
 
 # Configuration
-TARGET_REPOS = json.loads(os.environ.get("TARGET_REPOS", '["vanshb03/Summer2026-Internships"]'))
+TARGET_REPOS = json.loads(os.environ.get("TARGET_REPOS", '["vanshb03/Summer2027-Internships"]'))
 LISTINGS_PATH = os.environ.get("LISTINGS_PATH", ".github/scripts/listings.json")
 DATE_FIELD = os.environ.get("DATE_FIELD", "date_posted")
 DATE_FALLBACK = os.environ.get("DATE_FALLBACK", "date_updated")
@@ -59,19 +60,20 @@ MAX_TELEGRAM_MESSAGE_CHARS = 3900  # Leave room for headers in batch messages
 EPOCH_MIN_TIMESTAMP = 631152000   # Jan 1, 1990 00:00:00 UTC
 EPOCH_MAX_TIMESTAMP = 2208988800  # Jan 1, 2040 00:00:00 UTC
 
+# Dry run: print instead of sending, and never persist the seen cache
+DRY_RUN = is_dry_run()
+
 # State directory (configurable for cache separation)
 STATE_DIR = pathlib.Path(os.environ.get("STATE_DIR", ".state"))
 STATE_DIR.mkdir(exist_ok=True, parents=True)
 
 
-def get_listings(repo, path, ref=None):
-    """Fetch and parse listings JSON from a repository using robust helper"""
+def get_listings(repo):
+    """Fetch listings from the repo's default branch; [] on failure so one bad repo can't sink the digest"""
     try:
-        listings = fetch_file_json(repo, path, ref)
-        debug_log(f"[LISTINGS] {repo}:{path} → {len(listings)} items")
-        return listings
+        return fetch_listings(repo, LISTINGS_PATH)
     except Exception as e:
-        debug_log(f"[LISTINGS] {repo}:{path} → error: {e}")
+        debug_log(f"[LISTINGS] {repo} → error: {e}")
         return []
 
 
@@ -162,7 +164,7 @@ def send_telegram_batched(header, lines):
     token = os.getenv("TELEGRAM_BOT_TOKEN")
     chat_id = os.getenv("TELEGRAM_CHAT_ID")
     
-    if not token or not chat_id:
+    if not DRY_RUN and (not token or not chat_id):
         debug_log("[TELEGRAM] Missing credentials - BOT_TOKEN or CHAT_ID not set")
         return False
     
@@ -195,6 +197,8 @@ def main():
     debug_log(f"[CONFIG] TARGET_REPOS: {TARGET_REPOS}")
     debug_log(f"[CONFIG] WINDOW_HOURS: {WINDOW_HOURS}, COUNT: {COUNT}")
     debug_log(f"[CONFIG] DATE_FIELD: {DATE_FIELD}, DATE_FALLBACK: {DATE_FALLBACK}")
+    if DRY_RUN:
+        debug_log("[CONFIG] DRY_RUN=true - printing digest instead of sending; seen cache will not be saved")
     
     # Load seen cache for TTL-based duplicate prevention
     seen_cache_path = STATE_DIR / "seen.json"
@@ -217,12 +221,8 @@ def main():
         debug_log(f"[REPO] Processing {repo}")
         
         try:
-            # Get repository info
-            branch = get_default_branch(repo)
-            listings_path = detect_listings_path(repo, branch, LISTINGS_PATH)  # Pass LISTINGS_PATH as fallback
-            
-            # Fetch listings
-            listings = get_listings(repo, listings_path)
+            # Fetch listings from the repo's actual default branch
+            listings = get_listings(repo)
             if not listings:
                 debug_log(f"[REPO] {repo} → No listings found")
                 continue
@@ -289,7 +289,7 @@ def main():
     if not final_items:
         debug_log("[INFO] No items to send in digest")
         # Still save seen cache to prune stale entries on quiet runs
-        save_seen(seen, SEEN_TTL_DAYS, str(seen_cache_path))
+        save_seen(seen, SEEN_TTL_DAYS, str(seen_cache_path), dry_run=DRY_RUN)
         return True  # Success case - no items to send
     
     # Format items for display
@@ -328,7 +328,7 @@ def main():
                 seen[cache_key] = now_epoch
         
         # Save updated seen cache
-        save_seen(seen, SEEN_TTL_DAYS, str(seen_cache_path))
+        save_seen(seen, SEEN_TTL_DAYS, str(seen_cache_path), dry_run=DRY_RUN)
         debug_log(f"[CACHE] Updated seen cache with {len(final_items)} new items")
         debug_log(f"[SUCCESS] Digest sent with {len(final_items)} items")
         return True

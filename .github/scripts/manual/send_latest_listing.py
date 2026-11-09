@@ -2,56 +2,32 @@
 """
 Fetch the latest listing from the target repository's listings file and send it via Telegram.
 Relies on env vars: TARGET_REPO, LISTINGS_PATH (default listings.json), GH_TOKEN, TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID
+DRY_RUN=true prints the message instead of sending it.
 """
-import os, json, base64, requests
+import os, sys
+# Shared modules live one level up in .github/scripts; Python only adds this file's own dir to sys.path
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from format_utils import format_location, format_job_line
+from repo_utils import fetch_listings
+from telegram_utils import send_message
 
-GH = "https://api.github.com"
 TARGET_REPO = os.environ["TARGET_REPO"]
 LISTINGS_PATH = os.getenv("LISTINGS_PATH", "listings.json")
 DATE_FIELD = os.getenv("DATE_FIELD", "date_posted")
 DATE_FALLBACK = os.getenv("DATE_FALLBACK", "date_updated")
 MESSAGE_PREFIX = os.getenv("MESSAGE_PREFIX", "")  # Context prefix for messages
-HEADERS = {"Authorization": f"Bearer {os.getenv('GH_TOKEN','')}",
-           "Accept": "application/vnd.github+json"}
-
-def gh(url, **params):
-    r = requests.get(url, headers=HEADERS, params=params)
-    r.raise_for_status()
-    return r.json()
-
-def get_file(path: str, ref: str | None = None):
-    data = gh(f"{GH}/repos/{TARGET_REPO}/contents/{path}", ref=ref)  # default branch when ref None
-    if isinstance(data, dict) and data.get("encoding") == "base64":
-        return base64.b64decode(data["content"]).decode("utf-8")
-    if isinstance(data, dict) and "content" in data:
-        return data["content"]
-    raise RuntimeError("Unexpected response for contents API")
 
 def send_telegram(text: str):
-    tok = os.getenv("TELEGRAM_BOT_TOKEN"); chat = os.getenv("TELEGRAM_CHAT_ID")
-    if not tok or not chat:
-        print("Missing TELEGRAM_BOT_TOKEN or TELEGRAM_CHAT_ID")
-        return False
-        
-    r = requests.post(
-        f"https://api.telegram.org/bot{tok}/sendMessage",
-        json={"chat_id": chat, "text": text, "disable_web_page_preview": True}
-    )
-    print("Telegram status:", r.status_code, r.text)
-    return r.ok
+    ok, status, body = send_message(os.getenv("TELEGRAM_BOT_TOKEN"), os.getenv("TELEGRAM_CHAT_ID"), text)
+    print("Telegram status:", status, body)
+    return ok
 
 def main():
     try:
-        txt = get_file(LISTINGS_PATH)
+        # Default-branch aware, and handles >1MB listings files via download_url
+        data = fetch_listings(TARGET_REPO, LISTINGS_PATH)
     except Exception as e:
         print("Failed to fetch listings file:", e)
-        return 1
-
-    try:
-        data = json.loads(txt)
-    except Exception as e:
-        print("JSON parse error:", e)
         return 1
 
     if not isinstance(data, list) or not data:

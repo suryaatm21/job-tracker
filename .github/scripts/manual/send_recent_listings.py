@@ -10,10 +10,14 @@ Configuration via environment variables:
 - DATE_FIELD [default: "date_posted"], DATE_FALLBACK [default: "date_updated"]
 - COUNT [default: 10]
 """
-import os, json, base64, requests
+import os, sys
+# Shared modules live one level up in .github/scripts; Python only adds this file's own dir to sys.path
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+import json
 from datetime import datetime
 from urllib.parse import urlparse
-from github_helper import fetch_file_content, fetch_file_json, debug_log, gh_get, GH
+from repo_utils import fetch_listings
+from telegram_utils import send_message
 from format_utils import format_location, format_job_line
 
 # Multi-repo support with fallback to single repo
@@ -29,25 +33,6 @@ DATE_FIELD = os.getenv("DATE_FIELD", "date_posted")
 DATE_FALLBACK = os.getenv("DATE_FALLBACK", "date_updated")
 COUNT = max(1, int(os.getenv("COUNT", "10") or 10))
 MESSAGE_PREFIX = os.getenv("MESSAGE_PREFIX", "")  # Context prefix for messages
-
-def detect_listings_path(repo, branch="main"):
-    """Auto-detect listings.json path within repo"""
-    try:
-        # Try listings.json in root first
-        gh_get(f"{GH}/repos/{repo}/contents/listings.json", ref=branch)
-        return "listings.json"
-    except Exception:
-        try:
-            # Try in .github folder
-            gh_get(f"{GH}/repos/{repo}/contents/.github/listings.json", ref=branch)
-            return ".github/listings.json"
-        except Exception:
-            # Default fallback
-            return "listings.json"
-
-def get_file(repo, path: str, ref: str | None = None) -> str:
-    """Fetch a file's content from a repo at optional ref using robust helper"""
-    return fetch_file_content(repo, path, ref)
 
 def normalize_url(url):
     """Normalize URL to scheme+host+path for deduplication"""
@@ -139,8 +124,8 @@ def should_process_repo_item(item, repo):
     if not should_include_listing(item):
         return False, "quality"
     
-    # Only apply category filtering to SimplifyJobs repo
-    if repo == "SimplifyJobs/Summer2026-Internships":
+    # Only apply category filtering to SimplifyJobs repos (owner match survives yearly repo renames)
+    if repo.startswith("SimplifyJobs/"):
         category = classify_job_category(item)
         if category is None:
             return False, "category"
@@ -152,24 +137,18 @@ def should_process_repo_item(item, repo):
     return True, "allowed"
 
 def send_telegram(text: str) -> bool:
-    tok = os.getenv("TELEGRAM_BOT_TOKEN"); chat = os.getenv("TELEGRAM_CHAT_ID")
-    if not tok or not chat:
-        print("Missing TELEGRAM_BOT_TOKEN or TELEGRAM_CHAT_ID")
-        return False
-    r = requests.post(
-        f"https://api.telegram.org/bot{tok}/sendMessage",
-        json={
-            "chat_id": chat,
-            "text": text,
-            "disable_web_page_preview": True,
-            "parse_mode": "HTML",
-        },
-        timeout=30,
+    """Send a Telegram message to the configured chat (prints instead when DRY_RUN=true).
+
+    Returns True on 2xx HTTP status, False otherwise. Does not print sensitive data.
+    """
+    ok, status, body = send_message(
+        os.getenv("TELEGRAM_BOT_TOKEN"), os.getenv("TELEGRAM_CHAT_ID"), text, parse_mode="HTML"
     )
-    print("Telegram status:", r.status_code)
-    if not r.ok:
-        print(r.text)
-    return r.ok
+    print("Telegram status:", status)
+    if not ok:
+        # Print the response text only on error for diagnostics
+        print(body)
+    return ok
 
 def to_epoch(v) -> int:
     try:
@@ -191,12 +170,9 @@ def main() -> int:
     # Process each repository
     for repo in TARGET_REPOS:
         try:
-            # Auto-detect listings path for this repo
-            listings_path = LISTINGS_PATH if LISTINGS_PATH != "listings.json" else detect_listings_path(repo)
-            
-            print(f"Fetching from {repo}:{listings_path}")
-            txt = get_file(repo, listings_path)
-            data = json.loads(txt)
+            # Resolve the listings path on the repo's actual default branch, then fetch it
+            print(f"Fetching listings from {repo} (path hint: {LISTINGS_PATH})")
+            data = fetch_listings(repo, LISTINGS_PATH)
             
             if not isinstance(data, list):
                 print(f"Unexpected JSON structure in {repo}")
