@@ -5,6 +5,7 @@ Offline tests for the private opportunity digest. No network, no Telegram.
 Run: python -m unittest discover -s .github/scripts -p 'test_private_digest.py'
 """
 import json
+import os
 import pathlib
 import re
 import shutil
@@ -346,8 +347,77 @@ class DedupTest(unittest.TestCase):
         self.assertEqual(funnel.drops["dedup:url"][LEVEL_INTERN], 1)
 
 
+class FakeGitHub:
+    """Stands in for the GitHub API: default branch "main" and a fixed set of existing files."""
+
+    def __init__(self, files):
+        self.files = files  # {(repo, path): parsed JSON}
+        self.probes = []
+
+    def default_branch(self, repo):
+        if not any(r == repo for r, _ in self.files):
+            raise not_found()
+        return "main"
+
+    def gh_get(self, url, **params):
+        repo, path = url.split("/repos/", 1)[1].split("/contents/", 1)
+        self.probes.append((repo, path))
+        if (repo, path) not in self.files:
+            raise not_found()
+        return {"name": path.rsplit("/", 1)[-1]}
+
+    def fetch_json(self, repo, path, ref=None):
+        return self.files[(repo, path)]
+
+    def patches(self):
+        import repo_utils
+        return [
+            mock.patch.dict(repo_utils._LISTINGS_SOURCE_CACHE, clear=True),
+            mock.patch.object(repo_utils, "get_default_branch", side_effect=self.default_branch),
+            mock.patch.object(repo_utils, "gh_get", side_effect=self.gh_get),
+            mock.patch.object(repo_utils, "fetch_file_json", side_effect=self.fetch_json),
+            mock.patch.object(digest, "get_default_branch", side_effect=self.default_branch),
+            mock.patch.object(digest, "gh_get", side_effect=self.gh_get),
+        ]
+
+
+class ListingsPathTest(unittest.TestCase):
+    """Every listings.json source resolves through the shared repo_utils.fetch_listings()."""
+
+    def read(self, source, files):
+        fake = FakeGitHub(files)
+        with mock.patch("builtins.print"):
+            for p in fake.patches():
+                p.start()
+                self.addCleanup(p.stop)
+            return digest.read_listings_json(source, NOW), fake
+
+    def test_configured_sources_resolve(self):
+        listings_sources = [s for s in CONFIG["sources"] if s["type"] == "listings_json"]
+        self.assertEqual(len(listings_sources), 4)
+        for source in listings_sources:
+            with self.subTest(source=source["name"]):
+                path = source.get("path") or digest.DEFAULT_LISTINGS_PATH
+                data, fake = self.read(source, {(source["repo"], path): [{"title": "x"}]})
+                self.assertEqual(data, [{"title": "x"}])
+                self.assertEqual(fake.probes[-1], (source["repo"], path))
+        supra = next(s for s in listings_sources if s["name"] == "instagram:zero2sudo")
+        self.assertEqual((supra["repo"], supra["path"]), ("Supra16/JobTracker", "feed/listings.json"))
+
+    def test_default_sources_find_root_listings_json(self):
+        data, _ = self.read({"repo": "o/r"}, {("o/r", "listings.json"): [{"title": "root"}]})
+        self.assertEqual(data, [{"title": "root"}])
+
+    def test_explicit_path_is_never_swapped_for_another_file(self):
+        files = {("Supra16/JobTracker", "listings.json"): [{"title": "wrong file"}]}
+        with self.assertRaises(digest.SourceMissing):
+            self.read({"repo": "Supra16/JobTracker", "path": "feed/listings.json", "optional": True}, files)
+        with self.assertRaises(RuntimeError):
+            self.read({"repo": "Supra16/JobTracker", "path": "feed/listings.json"}, files)
+
+
 class DigestRunTest(unittest.TestCase):
-    """End-to-end dry runs with fetches mocked; covers Supra's Instagram feed contract."""
+    """End-to-end dry runs with GitHub mocked; covers Supra's Instagram feed contract."""
 
     def setUp(self):
         self.tmp = pathlib.Path(tempfile.mkdtemp())
@@ -370,9 +440,8 @@ class DigestRunTest(unittest.TestCase):
         patches = [
             mock.patch.object(digest, "CONFIG_DIR", config_dir),
             mock.patch.object(digest, "STATE_DIR", self.tmp / "state"),
-            mock.patch.object(digest, "DRY_RUN", True),
+            mock.patch.dict(os.environ, {"DRY_RUN": "true"}),
             mock.patch.object(digest, "DRY_RUN_REPORT", str(self.report)),
-            mock.patch.object(digest, "get_default_branch", return_value="main"),
             mock.patch.object(company_signals.CompanyProfiles, "_http_get", staticmethod(lambda url: None)),
         ]
         for p in patches:
@@ -380,22 +449,20 @@ class DigestRunTest(unittest.TestCase):
             self.addCleanup(p.stop)
 
     def run_digest(self, file_exists):
-        def gh_get(url, **params):
-            self.assertIn("repos/Supra16/JobTracker/contents/feed/listings.json", url)
-            if not file_exists:
-                raise not_found()
-            return {"name": "listings.json"}
-
-        with mock.patch.object(digest, "gh_get", side_effect=gh_get), \
-                mock.patch.object(digest, "fetch_file_json", return_value=self.feed) as fetch, \
-                mock.patch("builtins.print"):
+        files = {("Supra16/JobTracker", "feed/listings.json"): self.feed} if file_exists else \
+            {("Supra16/JobTracker", "README.md"): None}
+        fake = FakeGitHub(files)
+        with mock.patch("builtins.print"):
+            for p in fake.patches():
+                p.start()
+                self.addCleanup(p.stop)
             ok = digest.main()
-        return ok, fetch
+        return ok, fake
 
     def test_instagram_feed_flows_through_gates_and_levels(self):
-        ok, fetch = self.run_digest(file_exists=True)
+        ok, fake = self.run_digest(file_exists=True)
         self.assertTrue(ok)
-        fetch.assert_called_once_with("Supra16/JobTracker", "feed/listings.json", "main")
+        self.assertEqual(fake.probes[0], ("Supra16/JobTracker", "feed/listings.json"))
         report = json.loads(self.report.read_text())
         levels = report["levels"]
         self.assertEqual([s["company"] for s in levels["new_grad"]["scored"]], ["Stripe"])  # Seattle dropped
@@ -406,9 +473,9 @@ class DigestRunTest(unittest.TestCase):
         self.assertFalse((self.tmp / "state" / "seen.json").exists())  # dry run never writes seen state
 
     def test_missing_feed_is_skipped_quietly(self):
-        ok, fetch = self.run_digest(file_exists=False)
+        ok, fake = self.run_digest(file_exists=False)
         self.assertTrue(ok)
-        fetch.assert_not_called()
+        self.assertEqual(fake.probes, [("Supra16/JobTracker", "feed/listings.json")])  # one check, no fallback probing
         report = json.loads(self.report.read_text())
         self.assertEqual(report["errors"], {})
         self.assertIn("instagram:zero2sudo", report["skipped_optional_sources"])

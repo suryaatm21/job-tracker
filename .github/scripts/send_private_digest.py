@@ -37,12 +37,12 @@ from collections import defaultdict, OrderedDict
 
 import requests
 
-from github_helper import debug_log, fetch_file_content, fetch_file_json, gh_get, GH
-from repo_utils import get_default_branch, detect_listings_path
+from github_helper import debug_log, fetch_file_content, gh_get, GH
+from repo_utils import get_default_branch, fetch_listings, DEFAULT_LISTINGS_PATH
 from dedup_utils import get_dedup_key, get_primary_url
 from state_utils import (load_seen, save_seen, should_alert_item, get_cache_key,
                          should_include_item, parse_epoch)
-from telegram_utils import batch_send_message
+from telegram_utils import batch_send_message, is_dry_run
 from markdown_listings import parse_markdown_tables
 from opportunity_filters import (tag_level, LocationMatcher, CompanyTiers, normalize_company,
                                  parse_pay, listing_pay_text, passes_pay_gate,
@@ -68,7 +68,6 @@ def _hours(*names, default=48.0):
 
 WINDOW_HOURS = _hours("FORCE_WINDOW_HOURS", "WINDOW_HOURS")
 SEEN_TTL_DAYS = int(os.environ.get("SEEN_TTL_DAYS", "14"))
-DRY_RUN = os.environ.get("DRY_RUN", "false").strip().lower() in ("1", "true", "yes")
 DRY_RUN_REPORT = os.environ.get("DRY_RUN_REPORT")
 MAX_TELEGRAM_MESSAGE_CHARS = 3900
 
@@ -95,42 +94,41 @@ def _is_not_found(error):
     return response is not None and response.status_code == 404
 
 
-def _check_optional_source(source, branch):
-    """For "optional": true sources, raise SourceMissing when the repo or file 404s."""
+def _require_file(source):
+    """
+    Check that a source's configured repo and path exist on the default branch.
+    A 404 raises SourceMissing for "optional": true sources (skipped quietly) and
+    RuntimeError otherwise, so a configured path is never swapped for another file.
+    """
+    repo, path = source["repo"], source["path"]
     try:
-        gh_get(f"{GH}/repos/{source['repo']}/contents/{source['path']}", ref=branch)
+        branch = get_default_branch(repo)
+        gh_get(f"{GH}/repos/{repo}/contents/{path}", ref=branch)
     except requests.HTTPError as e:
-        if _is_not_found(e):
-            raise SourceMissing(f"{source['repo']}:{source['path']} not found") from e
-        raise
-
-
-def _branch_for(source):
-    if source.get("branch"):
-        return source["branch"]
-    try:
-        return get_default_branch(source["repo"])
-    except requests.HTTPError as e:
-        if source.get("optional") and _is_not_found(e):
-            raise SourceMissing(f"repo {source['repo']} not found") from e
-        raise
+        if not _is_not_found(e):
+            raise
+        if source.get("optional"):
+            raise SourceMissing(f"{repo}:{path} not found") from e
+        raise RuntimeError(f"configured path {repo}:{path} not found") from e
 
 
 def read_listings_json(source, now_epoch):
-    repo = source["repo"]
-    branch = _branch_for(source)
-    if source.get("optional"):
-        _check_optional_source(source, branch)
-    path = source.get("path") or detect_listings_path(repo, branch)
-    data = fetch_file_json(repo, path, branch)
+    """
+    listings.json feeds through the shared fetch_listings() (default branch, then
+    path detection). Sources without a "path" use the standard
+    .github/scripts/listings.json probe; an explicit "path" must exist first.
+    """
+    if source.get("path"):
+        _require_file(source)
+    data = fetch_listings(source["repo"], source.get("path") or DEFAULT_LISTINGS_PATH)
     return data if isinstance(data, list) else []
 
 
 def read_markdown_tables(source, now_epoch):
-    branch = _branch_for(source) if source.get("optional") else source.get("branch")
+    """README-style job tables, read from the repo's default branch."""
     if source.get("optional"):
-        _check_optional_source(source, branch)
-    text = fetch_file_content(source["repo"], source["path"], branch)
+        _require_file(source)
+    text = fetch_file_content(source["repo"], source["path"])
     return parse_markdown_tables(text, now_epoch)
 
 
@@ -353,8 +351,9 @@ def main():
         delay_seconds=profile_cfg.get("delay_seconds", 0.5),
         now_epoch=now_epoch,
     )
+    dry_run = is_dry_run()
     debug_log(f"[CONFIG] sources={len(sources)} window={WINDOW_HOURS}h ttl={SEEN_TTL_DAYS}d "
-              f"dry_run={DRY_RUN} state={STATE_DIR} remote={'on' if locator.include_remote else 'off'}")
+              f"dry_run={dry_run} state={STATE_DIR} remote={'on' if locator.include_remote else 'off'}")
 
     funnel = Funnel([s["name"] for s in sources])
     items = fetch_all(sources, funnel, profiles, now_epoch)
@@ -439,7 +438,7 @@ def main():
     if funnel.errors:
         debug_log(f"[WARN] Source errors: {funnel.errors}")
 
-    if DRY_RUN:
+    if dry_run:
         report_dry_run(rendered, funnel, strong_threshold)
         profiles.save()
         return True
