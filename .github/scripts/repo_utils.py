@@ -4,7 +4,12 @@ GitHub repository utilities for the job tracker.
 Handles commit fetching, file operations, and repository metadata.
 """
 import os
-from github_helper import fetch_file_content, debug_log, gh_get, GH
+from github_helper import fetch_file_content, fetch_file_json, debug_log, gh_get, GH
+
+DEFAULT_LISTINGS_PATH = ".github/scripts/listings.json"
+
+# (repo, path_hint) -> (branch, path); one lookup per repo per process
+_LISTINGS_SOURCE_CACHE = {}
 
 
 def get_default_branch(repo):
@@ -15,10 +20,39 @@ def get_default_branch(repo):
     return branch
 
 
-def detect_listings_path(repo, branch, fallback_path=".github/scripts/listings.json"):
+def resolve_listings_source(repo, path_hint=DEFAULT_LISTINGS_PATH):
+    """
+    Return (branch, path) for a repo's listings file on its actual default branch.
+
+    Listing repos do not all use `main` (both Summer2027-Internships repos default
+    to `dev`), so never assume a branch name: ask GitHub, then probe for the file
+    on that branch. Results are cached per process.
+    """
+    cache_key = (repo, path_hint)
+    if cache_key not in _LISTINGS_SOURCE_CACHE:
+        branch = get_default_branch(repo)
+        path = detect_listings_path(repo, branch, path_hint)
+        _LISTINGS_SOURCE_CACHE[cache_key] = (branch, path)
+    return _LISTINGS_SOURCE_CACHE[cache_key]
+
+
+def fetch_listings(repo, path_hint=DEFAULT_LISTINGS_PATH):
+    """
+    Fetch and parse a repo's listings JSON from its default branch.
+
+    Returns the parsed listings (a list for SimplifyJobs/vanshb03-style repos).
+    Raises on fetch or parse failure; callers decide whether to skip the repo.
+    """
+    branch, path = resolve_listings_source(repo, path_hint)
+    listings = fetch_file_json(repo, path, ref=branch)
+    debug_log(f"[LISTINGS] {repo}@{branch}:{path} → {len(listings) if isinstance(listings, list) else 'object'} items")
+    return listings
+
+
+def detect_listings_path(repo, branch, fallback_path=DEFAULT_LISTINGS_PATH):
     """Auto-detect listings.json path within repo"""
     # First check the configured/fallback path if it's not one of the defaults
-    paths_to_try = [".github/scripts/listings.json", "listings.json"]
+    paths_to_try = [DEFAULT_LISTINGS_PATH, "listings.json"]
     
     # If fallback_path is not in the default list, try it first
     if fallback_path not in paths_to_try:

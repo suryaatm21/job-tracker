@@ -32,7 +32,7 @@ CHANNELS = {
     "Hardware Channel": "TELEGRAM_CHAT_ID_CHANNEL_HARDWARE",
     "Quant Finance Channel": "TELEGRAM_CHAT_ID_CHANNEL_QUANT",
     "Product Management Channel": "TELEGRAM_CHAT_ID_CHANNEL_PM",
-    "PhD/MS Channel (SWE/ML)": "TELEGRAM_CHAT_ID_CHANNEL_SWE_ML_PHD",
+    "Job Tracker Channel (private, was PhD/MS)": "TELEGRAM_CHAT_ID_CHANNEL_SWE_ML_PHD",
 }
 
 def test_channel(name, env_var):

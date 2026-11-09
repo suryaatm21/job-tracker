@@ -32,6 +32,8 @@ _PREFIX_LEVELS = {
     "[CACHE]": "INFO",
     "[WINDOW]": "INFO",
     "[REPO]": "INFO",
+    "[BRANCH]": "INFO",
+    "[LISTINGS]": "INFO",
     "[AGGREGATE]": "INFO",
     "[DEDUP]": "INFO",
     "[TTL]": "INFO",

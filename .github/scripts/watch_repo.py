@@ -10,6 +10,8 @@ This module orchestrates the job watching workflow using modular utilities:
 - format_utils: Location and message formatting
 - state_utils: TTL-based seen cache management
 - telegram_utils: Message sending
+
+Set DRY_RUN=true to print the DM instead of sending it and leave STATE_DIR untouched.
 """
 import os, json, pathlib, time
 from datetime import datetime
@@ -22,14 +24,14 @@ from state_utils import (
     parse_epoch, get_primary_url
 )
 from format_utils import format_location, log_location_resolution, format_job_line
-from telegram_utils import send_message, batch_send_message
-from repo_utils import get_default_branch, detect_listings_path, get_repo_entries
+from telegram_utils import send_message, batch_send_message, is_dry_run
+from repo_utils import resolve_listings_source, get_repo_entries
 from dedup_utils import get_dedup_key, get_unified_season
 from job_filtering import should_process_repo_item
 from watcher_core import process_repo_entries
 
 # Multi-repo configuration
-TARGET_REPOS = json.loads(os.environ.get("TARGET_REPOS", '["vanshb03/Summer2026-Internships"]'))
+TARGET_REPOS = json.loads(os.environ.get("TARGET_REPOS", '["vanshb03/Summer2027-Internships"]'))
 WATCH_PATHS = set(json.loads(os.environ.get("WATCH_PATHS", '["listings.json"]')))
 
 # Path to the listings file within each repo
@@ -58,6 +60,11 @@ if BACK_ONE:
 # TTL configuration for seen cache
 SEEN_TTL_DAYS = int(os.getenv("SEEN_TTL_DAYS", "14"))
 
+# Dry run: print instead of sending, and never persist last-seen SHAs or the seen cache
+DRY_RUN = is_dry_run()
+if DRY_RUN:
+    debug_log("[CONFIG] DRY_RUN=true - printing DM instead of sending; state will not be saved")
+
 # State directory (configurable for cache separation)
 STATE_DIR = pathlib.Path(os.getenv("STATE_DIR", ".state"))
 STATE_DIR.mkdir(exist_ok=True, parents=True)
@@ -66,7 +73,7 @@ def send_telegram(text):
     """Send message to Telegram with debug logging and automatic batching"""
     debug_log(f"[TELEGRAM] Sending message: {len(text)} chars, preview: {text[:100]}...")
     tok = os.getenv("TELEGRAM_BOT_TOKEN"); chat = os.getenv("TELEGRAM_CHAT_ID")
-    if not tok or not chat: 
+    if not DRY_RUN and (not tok or not chat):
         debug_log("[TELEGRAM] Missing credentials - BOT_TOKEN or CHAT_ID not set")
         return False
     
@@ -171,9 +178,8 @@ def main():
         debug_log(f"[STATE] {repo} last_seen_SHA: {last_seen[:8] if last_seen else 'None'}")
         
         try:
-            # Detect default branch and listings path
-            default_branch = get_default_branch(repo)
-            listings_path = detect_listings_path(repo, default_branch, LISTINGS_PATH)
+            # Detect listings path on the repo's actual default branch
+            _branch, listings_path = resolve_listings_source(repo, LISTINGS_PATH)
             
             # Get new entries from this repo with TTL filtering
             repo_entries = process_repo_entries(
@@ -187,8 +193,11 @@ def main():
             commits = get_repo_entries(repo, per_page=1)
             if commits:
                 newest_sha = commits[0]["sha"]
-                last_file.write_text(newest_sha)
-                debug_log(f"[STATE] {repo} updated last_seen_SHA: {newest_sha[:8]}")
+                if DRY_RUN:
+                    debug_log(f"[STATE] {repo} DRY_RUN: would update last_seen_SHA to {newest_sha[:8]}")
+                else:
+                    last_file.write_text(newest_sha)
+                    debug_log(f"[STATE] {repo} updated last_seen_SHA: {newest_sha[:8]}")
         
         except Exception as e:
             debug_log(f"[ERROR] {repo} processing failed: {e}")
@@ -197,7 +206,7 @@ def main():
     if not all_entries:
         debug_log("[RESULT] No new entries found across all repos")
         # Still save seen cache to prune old entries
-        save_seen(seen, SEEN_TTL_DAYS, str(seen_cache_path))
+        save_seen(seen, SEEN_TTL_DAYS, str(seen_cache_path), dry_run=DRY_RUN)
         return
 
     debug_log(f"[RESULT] Found {len(all_entries)} new entries before deduplication")
@@ -273,7 +282,7 @@ def main():
         debug_log(f"[SEND] No messages to send after TTL filtering")
     
     # Save updated seen cache
-    save_seen(seen, SEEN_TTL_DAYS, str(seen_cache_path))
+    save_seen(seen, SEEN_TTL_DAYS, str(seen_cache_path), dry_run=DRY_RUN)
 
 if __name__ == "__main__":
     main()

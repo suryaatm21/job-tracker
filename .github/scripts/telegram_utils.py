@@ -11,9 +11,19 @@ import time
 import requests
 from typing import List, Tuple, Optional
 
+
+def is_dry_run() -> bool:
+    """True when DRY_RUN is set: print messages instead of sending, persist no state."""
+    return os.getenv("DRY_RUN", "false").strip().lower() in ("1", "true", "yes")
+
+
 def send_message(token: str, chat_id: str, text: str, parse_mode: Optional[str] = None) -> Tuple[bool, int, str]:
     """
     Send a single message to Telegram.
+
+    Every script the workflows run sends through here, so DRY_RUN is enforced
+    here: the message is printed and reported as sent, with no network call and
+    no credentials required.
     
     Args:
         token: Telegram bot token
@@ -24,6 +34,13 @@ def send_message(token: str, chat_id: str, text: str, parse_mode: Optional[str] 
     Returns:
         tuple[bool, int, str]: (success, status_code, response_body)
     """
+    if is_dry_run():
+        print(f"[DRY-RUN] Would send {len(text)} chars (parse_mode={parse_mode}):")
+        print("----- BEGIN MESSAGE -----")
+        print(text)
+        print("----- END MESSAGE -----")
+        return True, 200, "dry-run: not sent"
+
     if not token or not chat_id:
         return False, 0, "Missing token or chat_id"
     
@@ -166,7 +183,7 @@ def send_telegram_with_batching(text: str, parse_mode: Optional[str] = None) -> 
     token = os.getenv("TELEGRAM_BOT_TOKEN")
     chat_id = os.getenv("TELEGRAM_CHAT_ID")
     
-    if not token or not chat_id:
+    if not is_dry_run() and (not token or not chat_id):
         print("Missing TELEGRAM_BOT_TOKEN or TELEGRAM_CHAT_ID")
         return False
     

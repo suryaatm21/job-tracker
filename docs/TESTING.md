@@ -105,25 +105,42 @@ Ensure GitHub repository secrets are configured:
 
 Look for these log patterns:
 - "Starting multi-repo watch for: [...]"
-- "Processing repo: SimplifyJobs/Summer2026-Internships"
-- "Found X listings in SimplifyJobs/Summer2026-Internships"
+- "Processing repo: SimplifyJobs/Summer2027-Internships"
+- "Found X listings in SimplifyJobs/Summer2027-Internships"
 - "Found X entries before deduplication"
 - "After deduplication: X unique entries"
 - "Sending message with X lines" / "Sending digest with X entries"
 
-### Test deduplication locally (optional):
+### Dry run locally against live data (sends nothing):
+
+`DRY_RUN=true` makes every send path print the Telegram message instead of sending it, and skips saving the seen cache and last-seen SHAs. Unset the Telegram credentials too, so a send path that missed the switch still cannot reach Telegram.
 
 ```bash
 # Set environment variables:
-export TARGET_REPOS='["SimplifyJobs/Summer2026-Internships","vanshb03/Summer2026-Internships"]'
+export DRY_RUN=true
+unset TELEGRAM_BOT_TOKEN TELEGRAM_CHAT_ID
+export TARGET_REPOS='["SimplifyJobs/Summer2027-Internships","vanshb03/Summer2027-Internships"]'
 export LISTINGS_PATH=".github/scripts/listings.json"
 export DATE_FIELD="date_posted"
 export WINDOW_HOURS="24"
-export GH_TOKEN="your_token"
+export STATE_DIR="$(mktemp -d)"   # fresh state = what a first run after a long pause sees
+export GH_TOKEN="$(gh auth token)" # unauthenticated API calls hit the 60/hour limit fast
 
-# Run digest script:
+# Channel digest (set DIGEST_CATEGORIES / FILTER_GRADUATE_DEGREES from the channel's workflow env):
 python .github/scripts/send_digest_multi.py
+
+# DM watcher (fresh state scans the last 20 commits, so expect several large downloads):
+export WATCH_PATHS='["listings.json", ".github/scripts/listings.json"]'
+python .github/scripts/watch_repo.py
 ```
+
+### Category routing tests (no network):
+
+```bash
+python -m unittest discover -s .github/scripts -p 'test_category_routing.py'
+```
+
+Proves Simplify's `Hardware`/`Product`/`Quant` labels reach the matching role digests and never reach DM alerts. Needs `requests` installed (imported by `github_helper`).
 
 ## Success Criteria
 

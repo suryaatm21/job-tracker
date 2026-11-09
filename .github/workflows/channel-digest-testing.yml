@@ -34,7 +34,7 @@ concurrency:
   cancel-in-progress: false
 
 env:
-  TARGET_REPOS: '["SimplifyJobs/Summer2026-Internships","vanshb03/Summer2026-Internships"]'
+  TARGET_REPOS: '["SimplifyJobs/Summer2027-Internships","vanshb03/Summer2027-Internships"]'
   LISTINGS_PATH: '.github/scripts/listings.json'
   DATE_FIELD: 'date_posted'
   DATE_FALLBACK: 'date_updated'
@@ -46,9 +46,9 @@ jobs:
   digest:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
-        with: { python-version: '3.11' }
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with: { python-version: '3.12' }
       - run: pip install requests
 
       # Compute weekly cache key component (ISO year-week)
@@ -58,7 +58,7 @@ jobs:
       # Use separate cache for channel digest testing TTL state
       - name: Restore channel digest testing state
         id: cache-restore
-        uses: actions/cache/restore@v4
+        uses: actions/cache/restore@v6
         with:
           path: .state/channel-digest-testing
           key: channel-digest-testing-state-v1-${{ env.ISO_WEEK }}-${{ github.run_id }}
@@ -88,7 +88,7 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID_TESTING }}
-          TARGET_REPO: 'vanshb03/Summer2026-Internships'
+          TARGET_REPO: 'vanshb03/Summer2027-Internships'
           LISTINGS_PATH: ${{ env.LISTINGS_PATH }}
           MESSAGE_PREFIX: '🧪 Testing'
         run: python .github/scripts/manual/send_latest_listing.py
@@ -99,7 +99,7 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID_TESTING }}
-          TARGET_REPO: 'vanshb03/Summer2026-Internships'
+          TARGET_REPO: 'vanshb03/Summer2027-Internships'
           LISTINGS_PATH: ${{ env.LISTINGS_PATH }}
           MESSAGE_PREFIX: '🧪 Testing'
         run: python .github/scripts/manual/send_todays_listings.py
@@ -110,7 +110,7 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID_TESTING }}
-          TARGET_REPO: 'vanshb03/Summer2026-Internships'
+          TARGET_REPO: 'vanshb03/Summer2027-Internships'
           LISTINGS_PATH: ${{ env.LISTINGS_PATH }}
           COUNT: ${{ github.event.inputs.count }}
           MESSAGE_PREFIX: '🧪 Testing'
@@ -119,7 +119,7 @@ jobs:
       # Save channel digest testing TTL state (separate from production)
       - name: Save channel digest testing state
         if: always()
-        uses: actions/cache/save@v4
+        uses: actions/cache/save@v6
         with:
           path: .state/channel-digest-testing
           key: channel-digest-testing-state-v1-${{ env.ISO_WEEK }}-${{ github.run_id }}

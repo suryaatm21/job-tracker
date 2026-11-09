@@ -34,9 +34,9 @@ Add these 5 new secrets to enable the multi-channel digest workflows:
 
 ### 4. TELEGRAM_CHAT_ID_CHANNEL_SWE_ML_PHD
 - **Name:** `TELEGRAM_CHAT_ID_CHANNEL_SWE_ML_PHD`
-- **Value:** Your PhD channel chat ID (from `.env`)
-- **Used by:** `channel-digest-phd.yml`
-- **Purpose:** Graduate degree positions only (all categories)
+- **Value:** Your private job-tracker channel chat ID (from `.env`; this was the PhD channel)
+- **Used by:** no workflow in this repo yet (the Graduate Degrees digest was retired)
+- **Purpose:** Private job-tracker channel
 
 ### 5. TELEGRAM_CHAT_ID_CHANNEL (verify exists)
 - **Name:** `TELEGRAM_CHAT_ID_CHANNEL`
