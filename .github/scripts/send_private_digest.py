@@ -260,38 +260,53 @@ def dedup_groups(items, funnel):
     they share a gated metro in item["_metros"]; the same title in a different
     metro stays a separate listing. Earlier sources win the display slot, the kept
     item takes the ordered union of all members' locations and metros, and scoring
-    reads signals from every member.
+    reads signals from every member. A listing that bridges several existing
+    groups folds them all into the earliest one.
     Returns [(kept_item, [duplicates...])].
     """
-    groups = OrderedDict()
+    groups = {}
+    order = {}
     by_url = {}
     by_company_title = defaultdict(list)
     for item in items:
         url_key = get_dedup_key(item)
         ct_key = _company_title_key(item)
         metros = item.get("_metros") or []
-        hit = by_url.get(url_key) if url_key else None
-        reason = "dedup:url"
-        if hit is None:
-            reason = "dedup:company_title"
-            hit = next((gid for gid in by_company_title[ct_key]
-                        if set(groups[gid][0].get("_metros") or []) & set(metros)), None)
-        if hit is not None:
-            kept = groups[hit][0]
-            kept["_metros"] = _union(kept.get("_metros"), metros)
-            kept["locations"] = _union(kept.get("locations"), item.get("locations"))
-            groups[hit][1].append(item)
+        url_hit = by_url.get(url_key) if url_key else None
+        ct_hits = [gid for gid in by_company_title[ct_key]
+                   if set(groups[gid][0].get("_metros") or []) & set(metros)]
+        hits = sorted(({url_hit} if url_hit is not None else set()) | set(ct_hits), key=order.get)
+        if not hits:
+            gid = id(item)
+            groups[gid] = (item, [])
+            order[gid] = len(order)
             if url_key:
-                by_url.setdefault(url_key, hit)
-            funnel.drop(reason, item)
+                by_url[url_key] = gid
+            by_company_title[ct_key].append(gid)
+            funnel.keep("dedup", item)
             continue
-        gid = id(item)
-        groups[gid] = (item, [])
+        target = hits[0]
+        kept, dups = groups[target]
+        kept["_metros"] = _union(kept.get("_metros"), metros)
+        kept["locations"] = _union(kept.get("locations"), item.get("locations"))
+        dups.append(item)
+        funnel.drop("dedup:url" if hits[0] == url_hit else "dedup:company_title", item)
+        for gid in hits[1:]:
+            other, other_dups = groups.pop(gid)
+            kept["_metros"] = _union(kept["_metros"], other.get("_metros"))
+            kept["locations"] = _union(kept["locations"], other.get("locations"))
+            dups.extend([other, *other_dups])
+            funnel.counts[other["_source"]]["dedup"][other["_level"]] -= 1
+            funnel.drop("dedup:url" if gid == url_hit else "dedup:company_title", other)
+            for key, value in by_url.items():
+                if value == gid:
+                    by_url[key] = target
+            for bucket in by_company_title.values():
+                if gid in bucket:
+                    bucket.remove(gid)
         if url_key:
-            by_url[url_key] = gid
-        by_company_title[ct_key].append(gid)
-        funnel.keep("dedup", item)
-    return list(groups.values())
+            by_url.setdefault(url_key, target)
+    return [groups[g] for g in sorted(groups, key=order.get)]
 
 
 def render_level(level, scored, window_hours, strong_threshold, max_strong, max_maybe):

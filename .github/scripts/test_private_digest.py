@@ -372,6 +372,22 @@ class DedupTest(unittest.TestCase):
         self.assertEqual(kept["_metros"], ["SF Bay Area", "NYC"])
         self.assertEqual(kept["locations"], ["San Francisco, CA", "SF", "New York, NY"])
 
+    def test_bridging_listing_folds_all_overlapping_groups(self):
+        base = {"company_name": "Google", "title": "Software Engineer, New Grad", "_source": "s", "_level": LEVEL_NEW_GRAD}
+        a = dict(base, url="https://g.test/a", _metros=["SF Bay Area"], locations=["San Francisco, CA"])
+        c = dict(base, url="https://g.test/c", _metros=["NYC"], locations=["New York, NY"])
+        b = dict(base, url="https://g.test/b", _metros=["SF Bay Area", "NYC"],
+                 locations=["Mountain View, CA", "New York, NY"])
+        funnel = digest.Funnel(["s"])
+        groups = digest.dedup_groups([a, c, b], funnel)
+        self.assertEqual(len(groups), 1)
+        kept, dups = groups[0]
+        self.assertIs(kept, a)
+        self.assertEqual(dups, [b, c])
+        self.assertEqual(kept["_metros"], ["SF Bay Area", "NYC"])
+        self.assertEqual(funnel.counts["s"]["dedup"][LEVEL_NEW_GRAD], 1)
+        self.assertEqual(funnel.drops["dedup:company_title"][LEVEL_NEW_GRAD], 2)
+
     def test_same_url_merges_across_metros(self):
         base = {"company_name": "Acme", "title": "SWE", "url": "https://a.test/1", "_source": "s", "_level": LEVEL_NEW_GRAD}
         groups = digest.dedup_groups([dict(base, _metros=["NYC"]), dict(base, _metros=["Austin"])],
