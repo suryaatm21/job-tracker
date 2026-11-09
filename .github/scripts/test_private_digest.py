@@ -292,9 +292,6 @@ class CompanyProfilesTest(unittest.TestCase):
         profiles = self.make(max_lookups=1)
         profiles.lookup({"company_name": "First"})
         self.assertEqual(profiles.lookup({"company_name": "Second"}), (None, profiles.PROFILE_DEFERRED))
-        group = [{"company_name": "Second"}, {"company_name": "First"}]
-        profile, status = profiles.lookup_group(group)  # another spelling in the group is already cached
-        self.assertEqual(status, profiles.PROFILE_FOUND)
 
 
 class RenderTest(unittest.TestCase):
@@ -330,70 +327,56 @@ class CircuitBreakerTest(unittest.TestCase):
 
 
 class DedupTest(unittest.TestCase):
-    def test_company_title_merges_only_exact_normalized_names(self):
-        def job(company, title, url):
-            return {"company_name": company, "title": title, "url": url, "_source": "s", "_level": LEVEL_INTERN,
-                    "_metros": ["SF Bay Area"], "locations": ["San Francisco, CA"]}
+    TTL = 14 * 86400
 
-        items = [
-            job("Varda", "Site Reliability Internship", "https://a.test/1"),
-            job("Varda Space", "Site Reliability Internship", "https://zapply.test/1"),
-            job("VARDA", "Site Reliability Internship", "https://b.test/1"),
-            job("General Motors", "Software Engineering Intern", "https://gm.test/1"),
-            job("General Dynamics", "Software Engineering Intern", "https://gd.test/1"),
-            job("Other Name", "Different", "https://a.test/1"),  # same URL as the first: merged
-        ]
-        funnel = digest.Funnel(["s"])
-        groups = digest.dedup_groups(items, funnel)
-        self.assertEqual([(g[0]["company_name"], len(g[1])) for g in groups],
-                         [("Varda", 1), ("Varda Space", 0), ("General Motors", 0), ("General Dynamics", 0)])
-        self.assertEqual(funnel.drops["dedup:company_title"][LEVEL_INTERN], 1)
-        self.assertEqual(funnel.drops["dedup:url"][LEVEL_INTERN], 1)
+    def job(self, company, title, url, metros, source="s"):
+        return {"company_name": company, "title": title, "url": url, "_source": source,
+                "_level": LEVEL_NEW_GRAD, "_metros": metros}
 
+    def run_dedup(self, items, seen=None):
+        funnel = digest.Funnel(["s", "t"])
+        kept = digest.drop_seen_and_duplicates(items, dict(seen or {}), self.TTL, NOW, funnel)
+        return kept, funnel
 
-    def test_same_title_in_different_metros_stays_separate(self):
-        def job(location, metro, url, locations=None):
-            return {"company_name": "Google", "title": "Software Engineer, New Grad", "url": url,
-                    "_source": "s", "_level": LEVEL_NEW_GRAD, "_metros": [metro], "locations": [location]}
+    def test_cross_source_copy_in_one_metro_posts_once(self):
+        kept, funnel = self.run_dedup([
+            self.job("Acme", "SWE New Grad", "https://simplify.test/1", ["SF Bay Area"], "s"),
+            self.job("ACME", "SWE, New Grad", "https://speedy.test/2", ["SF Bay Area"], "t")])
+        self.assertEqual([i["url"] for i in kept], ["https://simplify.test/1"])
+        self.assertEqual(funnel.drops["dedup:company_title_metro"][LEVEL_NEW_GRAD], 1)
 
-        groups = digest.dedup_groups([job("Mountain View, CA", "SF Bay Area", "https://g.test/1"),
-                                      job("New York, NY", "NYC", "https://g.test/2")], digest.Funnel(["s"]))
-        self.assertEqual([(g[0]["_metros"], len(g[1])) for g in groups], [(["SF Bay Area"], 0), (["NYC"], 0)])
+    def test_same_title_in_two_metros_posts_both(self):
+        kept, _ = self.run_dedup([
+            self.job("Google", "Software Engineer, New Grad", "https://g.test/1", ["SF Bay Area"]),
+            self.job("Google", "Software Engineer, New Grad", "https://g.test/2", ["NYC"])])
+        self.assertEqual(len(kept), 2)
 
-    def test_shared_metro_merges_and_unions_locations(self):
-        base = {"company_name": "Acme", "title": "SWE New Grad", "_source": "s", "_level": LEVEL_NEW_GRAD}
-        first = dict(base, url="https://a.test/1", _metros=["SF Bay Area"], locations=["San Francisco, CA"])
-        second = dict(base, url="https://b.test/2", _metros=["SF Bay Area", "NYC"], locations=["SF", "New York, NY"])
-        groups = digest.dedup_groups([first, second], digest.Funnel(["s"]))
-        self.assertEqual(len(groups), 1)
-        kept, dups = groups[0]
-        self.assertIs(kept, first)
-        self.assertEqual(dups, [second])
-        self.assertEqual(kept["_metros"], ["SF Bay Area", "NYC"])
-        self.assertEqual(kept["locations"], ["San Francisco, CA", "SF", "New York, NY"])
+    def test_bridge_posts_unsent_metro_once_in_either_order(self):
+        title = "Software Engineer, New Grad"
+        sent_sf = self.job("Google", title, "https://g.test/sf", ["SF Bay Area"])
+        seen = {key: NOW - 3600 for key in sum(digest.listing_keys(sent_sf), [])}
+        for nyc_first in (True, False):
+            nyc = self.job("Google", title, "https://g.test/nyc", ["NYC"])
+            bridge = self.job("Google", title, "https://g.test/bridge", ["SF Bay Area", "NYC"])
+            order = [nyc, bridge] if nyc_first else [bridge, nyc]
+            kept, funnel = self.run_dedup([dict(sent_sf), *order], seen)
+            self.assertEqual(len(kept), 1, nyc_first)
+            self.assertIn("NYC", kept[0]["_metros"])
+            self.assertEqual(funnel.drops["ttl:already_sent"][LEVEL_NEW_GRAD], 1)
 
-    def test_bridging_listing_folds_all_overlapping_groups(self):
-        base = {"company_name": "Google", "title": "Software Engineer, New Grad", "_source": "s", "_level": LEVEL_NEW_GRAD}
-        a = dict(base, url="https://g.test/a", _metros=["SF Bay Area"], locations=["San Francisco, CA"])
-        c = dict(base, url="https://g.test/c", _metros=["NYC"], locations=["New York, NY"])
-        b = dict(base, url="https://g.test/b", _metros=["SF Bay Area", "NYC"],
-                 locations=["Mountain View, CA", "New York, NY"])
-        funnel = digest.Funnel(["s"])
-        groups = digest.dedup_groups([a, c, b], funnel)
-        self.assertEqual(len(groups), 1)
-        kept, dups = groups[0]
-        self.assertIs(kept, a)
-        self.assertEqual(dups, [b, c])
-        self.assertEqual(kept["_metros"], ["SF Bay Area", "NYC"])
-        self.assertEqual(funnel.counts["s"]["dedup"][LEVEL_NEW_GRAD], 1)
-        self.assertEqual(funnel.drops["dedup:company_title"][LEVEL_NEW_GRAD], 2)
+    def test_same_url_drops_second_and_similar_names_stay_separate(self):
+        kept, funnel = self.run_dedup([
+            self.job("Amazon", "SDE New Grad", "https://a.test/1", ["NYC"]),
+            self.job("Other", "Different", "https://a.test/1", ["Austin"]),
+            self.job("Amazon Web Services", "SDE New Grad", "https://a.test/2", ["NYC"])])
+        self.assertEqual([i["company_name"] for i in kept], ["Amazon", "Amazon Web Services"])
+        self.assertEqual(funnel.drops["dedup:url"][LEVEL_NEW_GRAD], 1)
 
-    def test_same_url_merges_across_metros(self):
-        base = {"company_name": "Acme", "title": "SWE", "url": "https://a.test/1", "_source": "s", "_level": LEVEL_NEW_GRAD}
-        groups = digest.dedup_groups([dict(base, _metros=["NYC"]), dict(base, _metros=["Austin"])],
-                                     digest.Funnel(["s"]))
-        self.assertEqual(len(groups), 1)
-        self.assertEqual(groups[0][0]["_metros"], ["NYC", "Austin"])
+    def test_seen_keys_suppress_only_within_ttl(self):
+        item = self.job("Acme", "SWE", "https://a.test/1", ["NYC"])
+        keys = sum(digest.listing_keys(item), [])
+        self.assertEqual(self.run_dedup([dict(item)], {k: NOW - self.TTL + 60 for k in keys})[0], [])
+        self.assertEqual(len(self.run_dedup([dict(item)], {k: NOW - self.TTL - 60 for k in keys})[0]), 1)
 
 
 class FakeGitHub:
@@ -427,6 +410,7 @@ class FakeGitHub:
             mock.patch.object(repo_utils, "fetch_file_json", side_effect=self.fetch_json),
             mock.patch.object(digest, "get_default_branch", side_effect=self.default_branch),
             mock.patch.object(digest, "gh_get", side_effect=self.gh_get),
+            mock.patch.object(digest, "fetch_file_json", side_effect=self.fetch_json),
         ]
 
 

@@ -209,26 +209,6 @@ class CompanyProfiles:
         self.cache[key] = {"fetched_at": self.now_epoch, "slug": slug, "profile": profile}
         return profile, self.PROFILE_FOUND if profile else self.PROFILE_NONE
 
-    def lookup_group(self, group):
-        """
-        First profile found across duplicate listings of one job (the boards
-        spell companies differently: "Astranis" vs "Astranis Space Technologies").
-        Returns (profile_or_None, status); PROFILE_DEFERRED only when no member
-        has a profile and at least one member is waiting on budget.
-        """
-        deferred = False
-        tried = set()
-        for member in group:
-            key = normalize_company(member.get("company_name"))
-            if key in tried:
-                continue
-            tried.add(key)
-            profile, status = self.lookup(member)
-            if profile:
-                return profile, self.PROFILE_FOUND
-            deferred = deferred or status == self.PROFILE_DEFERRED
-        return None, self.PROFILE_DEFERRED if deferred else self.PROFILE_NONE
-
 
 # ---------------------------------------------------------------------------
 # Scoring

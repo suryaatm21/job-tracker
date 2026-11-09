@@ -7,7 +7,7 @@ posted to one private Telegram chat.
 Pipeline (counts are reported per source and level after every stage):
     fetch -> quality -> window -> location (hard gate)
           -> pay (hard gate, only when the listing states pay)
-          -> dedup (URL, then company+title across sources) -> TTL state
+          -> dedup + TTL state, per listing (see drop_seen_and_duplicates)
           -> score (tiers, Simplify funding profile, posted pay) -> render
 
 Scoring never drops a listing: low scores go to a compact "maybe" section.
@@ -39,8 +39,8 @@ import requests
 
 from github_helper import debug_log, fetch_file_content, fetch_file_json, gh_get, GH
 from repo_utils import get_default_branch, fetch_listings, DEFAULT_LISTINGS_PATH
-from dedup_utils import get_dedup_key, get_primary_url
-from state_utils import (load_seen, save_seen, should_alert_item, get_cache_key,
+from dedup_utils import get_primary_url
+from state_utils import (load_seen, save_seen, get_cache_key,
                          should_include_item, parse_epoch)
 from telegram_utils import batch_send_message, is_dry_run
 from markdown_listings import parse_markdown_tables
@@ -249,64 +249,49 @@ def _company_title_key(item):
     return ("company_title", normalize_company(item.get("company_name")), _title_key(item))
 
 
-def _union(first, second):
-    return list(OrderedDict.fromkeys([*(first or []), *(second or [])]))
+def listing_keys(item):
+    """Canonical URL key plus one company+title key per gated metro of the listing."""
+    company, title = normalize_company(item.get("company_name")), _title_key(item)
+    url_key = get_cache_key(item)
+    return ([url_key] if url_key else []), [f"ct:{company}|{title}|{metro}" for metro in item.get("_metros") or []]
 
 
-def dedup_groups(items, funnel):
+def drop_seen_and_duplicates(items, seen, ttl_seconds, now_epoch, funnel):
     """
-    Collapse duplicates within this run. Two listings merge when their canonical
-    URL/id keys match, or when their exact normalized company and title match and
-    they share a gated metro in item["_metros"]; the same title in a different
-    metro stays a separate listing. Earlier sources win the display slot, the kept
-    item takes the ordered union of all members' locations and metros, and scoring
-    reads signals from every member. A listing that bridges several existing
-    groups folds them all into the earliest one.
-    Returns [(kept_item, [duplicates...])].
+    Judge each listing on its own keys, in input order. A listing is dropped when
+    its URL key is already seen, or when every one of its company+title+metro keys
+    is already seen. A key is seen when seen.json holds it within the TTL window or
+    an earlier listing of this run recorded it. Cross-source copies of one posting
+    in the same metro therefore post once, the same title in another metro stays a
+    separate opportunity, and a listing in a never-sent metro is never suppressed
+    by a copy that was sent elsewhere. Kept listings carry their keys in item["_keys"].
     """
-    groups = {}
-    order = {}
-    by_url = {}
-    by_company_title = defaultdict(list)
+    run_seen = set()
+    kept = []
     for item in items:
-        url_key = get_dedup_key(item)
-        ct_key = _company_title_key(item)
-        metros = item.get("_metros") or []
-        url_hit = by_url.get(url_key) if url_key else None
-        ct_hits = [gid for gid in by_company_title[ct_key]
-                   if set(groups[gid][0].get("_metros") or []) & set(metros)]
-        hits = sorted(({url_hit} if url_hit is not None else set()) | set(ct_hits), key=order.get)
-        if not hits:
-            gid = id(item)
-            groups[gid] = (item, [])
-            order[gid] = len(order)
-            if url_key:
-                by_url[url_key] = gid
-            by_company_title[ct_key].append(gid)
-            funnel.keep("dedup", item)
+        url_keys, metro_keys = listing_keys(item)
+
+        def hit(key):
+            if key in run_seen:
+                return "run"
+            last = seen.get(key)
+            return "seen" if last is not None and now_epoch - last <= ttl_seconds else None
+
+        url_hit = next((h for h in map(hit, url_keys) if h), None)
+        metro_hits = [hit(k) for k in metro_keys]
+        covering = [url_hit] if url_hit else (metro_hits if metro_hits and all(metro_hits) else [])
+        if "run" in covering:
+            funnel.drop("dedup:url" if url_hit else "dedup:company_title_metro", item)
             continue
-        target = hits[0]
-        kept, dups = groups[target]
-        kept["_metros"] = _union(kept.get("_metros"), metros)
-        kept["locations"] = _union(kept.get("locations"), item.get("locations"))
-        dups.append(item)
-        funnel.drop("dedup:url" if hits[0] == url_hit else "dedup:company_title", item)
-        for gid in hits[1:]:
-            other, other_dups = groups.pop(gid)
-            kept["_metros"] = _union(kept["_metros"], other.get("_metros"))
-            kept["locations"] = _union(kept["locations"], other.get("locations"))
-            dups.extend([other, *other_dups])
-            funnel.counts[other["_source"]]["dedup"][other["_level"]] -= 1
-            funnel.drop("dedup:url" if gid == url_hit else "dedup:company_title", other)
-            for key, value in by_url.items():
-                if value == gid:
-                    by_url[key] = target
-            for bucket in by_company_title.values():
-                if gid in bucket:
-                    bucket.remove(gid)
-        if url_key:
-            by_url.setdefault(url_key, target)
-    return [groups[g] for g in sorted(groups, key=order.get)]
+        funnel.keep("dedup", item)
+        if covering:
+            funnel.drop("ttl:already_sent", item)
+            continue
+        funnel.keep("ttl", item)
+        item["_keys"] = [*url_keys, *metro_keys]
+        run_seen.update(item["_keys"])
+        kept.append(item)
+    return kept
 
 
 def render_level(level, scored, window_hours, strong_threshold, max_strong, max_maybe):
@@ -409,32 +394,24 @@ def main():
         funnel.keep("pay", item)
         located.append(item)
 
-    ttl_seconds = SEEN_TTL_DAYS * 86400
-    fresh_groups = []
-    for kept, dups in dedup_groups(located, funnel):
-        group = [kept, *dups]
-        if all(should_alert_item(m, seen, ttl_seconds, now_epoch)[0] for m in group):
-            funnel.keep("ttl", kept)
-            fresh_groups.append((kept, group))
-        else:
-            funnel.drop("ttl:already_sent", kept)
+    fresh = drop_seen_and_duplicates(located, seen, SEEN_TTL_DAYS * 86400, now_epoch, funnel)
 
     strong_threshold = int(scoring.get("strong_threshold", 3))
     by_level = defaultdict(list)
     deferred = 0
-    for kept, group in fresh_groups:
-        tier_match = next((m for m in (tiers.match(g["company_name"]) for g in group) if m), None)
+    for kept in fresh:
+        tier_match = tiers.match(kept["company_name"])
         # Listed companies already clear the bar; fetch profiles only for the rest
         profile = None
         if not tier_match or int(tier_match[0].get("points", 0)) < strong_threshold:
-            profile, status = profiles.lookup_group(group)
+            profile, status = profiles.lookup(kept)
             if status == profiles.PROFILE_DEFERRED:
                 # Not scored yet: hold for the next run instead of posting with half the signals
                 deferred += 1
                 funnel.note("deferred:profile_lookup_budget", kept)
                 continue
         score, reasons = score_listing(kept, kept["_level"], tier_match, profile, scoring, now_epoch)
-        by_level[kept["_level"]].append((score, reasons, kept["_metros"], kept, group))
+        by_level[kept["_level"]].append((score, reasons, kept["_metros"], kept))
 
     rendered = []
     for level in LEVELS:
@@ -444,8 +421,8 @@ def main():
             digest_cfg.get("max_strong_per_level", 40), digest_cfg.get("max_maybe_per_level", 25))
         if header:
             shown_ids = {id(i) for i in shown}
-            groups = [s[4] for s in scored if id(s[3]) in shown_ids]
-            rendered.append((level, header, lines, groups, scored))
+            posted = [s[3] for s in scored if id(s[3]) in shown_ids]
+            rendered.append((level, header, lines, posted, scored))
 
     debug_log("[SUMMARY] Funnel (survivors after each stage)\n" + funnel.table())
     debug_log("[SUMMARY] Drops\n" + funnel.drop_table())
@@ -470,19 +447,17 @@ def main():
         return True
 
     all_ok = True
-    for level, header, lines, groups, _ in rendered:
+    for level, header, lines, posted, _ in rendered:
         ok, results = batch_send_message(token, chat_id, header, lines,
                                          max_chars=MAX_TELEGRAM_MESSAGE_CHARS, parse_mode="HTML")
         if not ok:
             all_ok = False
             debug_log(f"[ERROR] Send failed for {level}: {results}")
             continue
-        for group in groups:
-            for member in group:
-                key = get_cache_key(member)
-                if key:
-                    seen[key] = now_epoch
-        debug_log(f"[SEND] {level}: {len(groups)} listings")
+        for item in posted:
+            for key in item["_keys"]:
+                seen[key] = now_epoch
+        debug_log(f"[SEND] {level}: {len(posted)} listings")
 
     profiles.save()
     save_seen(seen, SEEN_TTL_DAYS, str(seen_path))
@@ -502,9 +477,9 @@ def report_dry_run(rendered, funnel, strong_threshold):
     report = {"funnel": funnel.table(), "drops": funnel.drop_table(), "pay_info": funnel.notes_table(),
               "errors": funnel.errors, "skipped_optional_sources": funnel.skipped,
               "strong_threshold": strong_threshold, "levels": {}}
-    for level, header, lines, groups, scored in rendered:
+    for level, header, lines, posted, scored in rendered:
         batches = safe_join_lines(header, lines, MAX_TELEGRAM_MESSAGE_CHARS)
-        print(f"\n----- {level}: {len(groups)} listings in {len(batches)} message(s) -----")
+        print(f"\n----- {level}: {len(posted)} listings in {len(batches)} message(s) -----")
         for b in batches:
             print(b)
             print("·····")
@@ -513,7 +488,7 @@ def report_dry_run(rendered, funnel, strong_threshold):
             "scored": [{"score": s, "reasons": r, "metros": m, "company": i["company_name"],
                         "title": i["title"], "source": i["_source"], "url": get_primary_url(i),
                         "on_a_tier_list": any(x.startswith("tier:") for x in r)}
-                       for s, r, m, i, _ in scored],
+                       for s, r, m, i in scored],
         }
     if DRY_RUN_REPORT:
         pathlib.Path(DRY_RUN_REPORT).write_text(json.dumps(report, indent=1), encoding="utf-8")
