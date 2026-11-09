@@ -332,7 +332,8 @@ class CircuitBreakerTest(unittest.TestCase):
 class DedupTest(unittest.TestCase):
     def test_company_title_merges_only_exact_normalized_names(self):
         def job(company, title, url):
-            return {"company_name": company, "title": title, "url": url, "_source": "s", "_level": LEVEL_INTERN}
+            return {"company_name": company, "title": title, "url": url, "_source": "s", "_level": LEVEL_INTERN,
+                    "_metros": ["SF Bay Area"], "locations": ["San Francisco, CA"]}
 
         items = [
             job("Varda", "Site Reliability Internship", "https://a.test/1"),
@@ -348,6 +349,35 @@ class DedupTest(unittest.TestCase):
                          [("Varda", 1), ("Varda Space", 0), ("General Motors", 0), ("General Dynamics", 0)])
         self.assertEqual(funnel.drops["dedup:company_title"][LEVEL_INTERN], 1)
         self.assertEqual(funnel.drops["dedup:url"][LEVEL_INTERN], 1)
+
+
+    def test_same_title_in_different_metros_stays_separate(self):
+        def job(location, metro, url, locations=None):
+            return {"company_name": "Google", "title": "Software Engineer, New Grad", "url": url,
+                    "_source": "s", "_level": LEVEL_NEW_GRAD, "_metros": [metro], "locations": [location]}
+
+        groups = digest.dedup_groups([job("Mountain View, CA", "SF Bay Area", "https://g.test/1"),
+                                      job("New York, NY", "NYC", "https://g.test/2")], digest.Funnel(["s"]))
+        self.assertEqual([(g[0]["_metros"], len(g[1])) for g in groups], [(["SF Bay Area"], 0), (["NYC"], 0)])
+
+    def test_shared_metro_merges_and_unions_locations(self):
+        base = {"company_name": "Acme", "title": "SWE New Grad", "_source": "s", "_level": LEVEL_NEW_GRAD}
+        first = dict(base, url="https://a.test/1", _metros=["SF Bay Area"], locations=["San Francisco, CA"])
+        second = dict(base, url="https://b.test/2", _metros=["SF Bay Area", "NYC"], locations=["SF", "New York, NY"])
+        groups = digest.dedup_groups([first, second], digest.Funnel(["s"]))
+        self.assertEqual(len(groups), 1)
+        kept, dups = groups[0]
+        self.assertIs(kept, first)
+        self.assertEqual(dups, [second])
+        self.assertEqual(kept["_metros"], ["SF Bay Area", "NYC"])
+        self.assertEqual(kept["locations"], ["San Francisco, CA", "SF", "New York, NY"])
+
+    def test_same_url_merges_across_metros(self):
+        base = {"company_name": "Acme", "title": "SWE", "url": "https://a.test/1", "_source": "s", "_level": LEVEL_NEW_GRAD}
+        groups = digest.dedup_groups([dict(base, _metros=["NYC"]), dict(base, _metros=["Austin"])],
+                                     digest.Funnel(["s"]))
+        self.assertEqual(len(groups), 1)
+        self.assertEqual(groups[0][0]["_metros"], ["NYC", "Austin"])
 
 
 class FakeGitHub:

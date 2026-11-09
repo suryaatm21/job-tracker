@@ -249,34 +249,47 @@ def _company_title_key(item):
     return ("company_title", normalize_company(item.get("company_name")), _title_key(item))
 
 
+def _union(first, second):
+    return list(OrderedDict.fromkeys([*(first or []), *(second or [])]))
+
+
 def dedup_groups(items, funnel):
     """
-    Collapse duplicates within this run. First by the shared URL/id key, then by
-    normalized company + title so the same job reached through a redirect or short link
-    (zapply.jobs, go.vansh.nyc) is posted once. Earlier sources win the display
-    slot; scoring reads signals from every member.
+    Collapse duplicates within this run. Two listings merge when their canonical
+    URL/id keys match, or when their exact normalized company and title match and
+    they share a gated metro in item["_metros"]; the same title in a different
+    metro stays a separate listing. Earlier sources win the display slot, the kept
+    item takes the ordered union of all members' locations and metros, and scoring
+    reads signals from every member.
     Returns [(kept_item, [duplicates...])].
     """
     groups = OrderedDict()
     by_url = {}
-    by_company_title = {}
+    by_company_title = defaultdict(list)
     for item in items:
         url_key = get_dedup_key(item)
         ct_key = _company_title_key(item)
+        metros = item.get("_metros") or []
         hit = by_url.get(url_key) if url_key else None
         reason = "dedup:url"
         if hit is None:
             reason = "dedup:company_title"
-            hit = by_company_title.get(ct_key)
+            hit = next((gid for gid in by_company_title[ct_key]
+                        if set(groups[gid][0].get("_metros") or []) & set(metros)), None)
         if hit is not None:
+            kept = groups[hit][0]
+            kept["_metros"] = _union(kept.get("_metros"), metros)
+            kept["locations"] = _union(kept.get("locations"), item.get("locations"))
             groups[hit][1].append(item)
+            if url_key:
+                by_url.setdefault(url_key, hit)
             funnel.drop(reason, item)
             continue
         gid = id(item)
         groups[gid] = (item, [])
         if url_key:
             by_url[url_key] = gid
-        by_company_title[ct_key] = gid
+        by_company_title[ct_key].append(gid)
         funnel.keep("dedup", item)
     return list(groups.values())
 
