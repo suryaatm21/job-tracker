@@ -106,6 +106,8 @@ class CompanyProfiles:
     the entry is older than refresh_days.
     """
 
+    MAX_CONSECUTIVE_ERRORS = 3
+
     def __init__(self, cache_path, refresh_days=14, max_lookups=40, delay_seconds=0.5,
                  fetch_page=None, now_epoch=None):
         self.cache_path = pathlib.Path(cache_path)
@@ -118,6 +120,8 @@ class CompanyProfiles:
         self.lookups = 0
         self.cache_hits = 0
         self.skipped_budget = 0
+        self.consecutive_errors = 0
+        self.disabled = False  # circuit breaker: Simplify unreachable or blocking this runner
         self.cache = self._load()
 
     def _load(self):
@@ -138,7 +142,7 @@ class CompanyProfiles:
 
     @staticmethod
     def _http_get(url):
-        r = requests.get(url, headers={"User-Agent": USER_AGENT}, timeout=30)
+        r = requests.get(url, headers={"User-Agent": USER_AGENT}, timeout=10)
         if r.status_code == 404:
             return None
         r.raise_for_status()
@@ -173,6 +177,9 @@ class CompanyProfiles:
         if entry and self.now_epoch - int(entry.get("fetched_at", 0)) < self.refresh_seconds:
             self.cache_hits += 1
             return entry.get("profile"), self.PROFILE_FOUND if entry.get("profile") else self.PROFILE_NONE
+        if self.disabled:
+            stale = entry.get("profile") if entry else None
+            return stale, self.PROFILE_FOUND if stale else self.PROFILE_NONE
         if self.lookups >= self.max_lookups:
             self.skipped_budget += 1
             if entry:
@@ -190,8 +197,15 @@ class CompanyProfiles:
             profile = parse_simplify_company_page(page) if page else None
         except Exception as e:  # network errors keep the stale entry, if any
             debug_log(f"[WARN] Simplify profile fetch failed for {slug}: {e}")
+            self.consecutive_errors += 1
+            if self.consecutive_errors >= self.MAX_CONSECUTIVE_ERRORS:
+                # Score the rest without profiles rather than deferring them forever
+                self.disabled = True
+                print(f"::warning::Simplify profile lookups failed {self.consecutive_errors} times in a row; "
+                      "scoring the rest of this run from tiers and posted pay only")
             stale = entry.get("profile") if entry else None
             return stale, self.PROFILE_FOUND if stale else self.PROFILE_NONE
+        self.consecutive_errors = 0
         self.cache[key] = {"fetched_at": self.now_epoch, "slug": slug, "profile": profile}
         return profile, self.PROFILE_FOUND if profile else self.PROFILE_NONE
 

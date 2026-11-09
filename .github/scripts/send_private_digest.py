@@ -151,6 +151,8 @@ class Funnel:
         self.sources = list(source_names)
         self.counts = {s: {stage: defaultdict(int) for stage in STAGES} for s in self.sources}
         self.drops = defaultdict(lambda: defaultdict(int))  # reason -> level -> n
+        for gate in ("location:elsewhere", "location:remote_only", "location:unknown", "pay:below_floor"):
+            self.drops[gate]  # hard gates always get a row, even at zero
         self.notes = defaultdict(lambda: defaultdict(int))  # e.g. pay status -> level -> n
         self.errors = {}
         self.skipped = {}
@@ -243,13 +245,20 @@ def _title_key(item):
 
 def _company_title_key(item):
     """
-    Cross-source duplicate key: first word of the normalized company plus the
+    Cross-source duplicate bucket: first word of the normalized company plus the
     normalized title. Boards spell companies differently ("Astranis" vs
-    "Astranis Space Technologies", "Varda" vs "Varda Space"); requiring the same
-    full title keeps unrelated companies apart.
+    "Astranis Space Technologies", "Varda" vs "Varda Space").
     """
     company = normalize_company(item.get("company_name")).split()
     return ("company_title", company[0] if company else "", _title_key(item))
+
+
+def _same_company(a, b):
+    """True when one normalized name is a word-prefix of the other ("varda" / "varda space"),
+    so "General Motors" and "General Dynamics" never merge on a shared generic title."""
+    a, b = normalize_company(a).split(), normalize_company(b).split()
+    shorter, longer = (a, b) if len(a) <= len(b) else (b, a)
+    return bool(shorter) and longer[:len(shorter)] == shorter
 
 
 def dedup_groups(items, funnel):
@@ -261,15 +270,17 @@ def dedup_groups(items, funnel):
     Returns [(kept_item, [duplicates...])].
     """
     groups = OrderedDict()
-    by_key = {}
+    by_url = {}
+    by_company_title = defaultdict(list)  # bucket -> [(company_name, group id)]
     for item in items:
         url_key = get_dedup_key(item)
         ct_key = _company_title_key(item)
-        hit = by_key.get(url_key) if url_key else None
+        hit = by_url.get(url_key) if url_key else None
         reason = "dedup:url"
         if hit is None:
-            hit = by_key.get(ct_key)
             reason = "dedup:company_title"
+            hit = next((gid for name, gid in by_company_title[ct_key]
+                        if _same_company(name, item.get("company_name"))), None)
         if hit is not None:
             groups[hit][1].append(item)
             funnel.drop(reason, item)
@@ -277,8 +288,8 @@ def dedup_groups(items, funnel):
         gid = id(item)
         groups[gid] = (item, [])
         if url_key:
-            by_key[url_key] = gid
-        by_key[ct_key] = gid
+            by_url[url_key] = gid
+        by_company_title[ct_key].append((item.get("company_name"), gid))
         funnel.keep("dedup", item)
     return list(groups.values())
 
@@ -312,7 +323,7 @@ def render_level(level, scored, window_hours, strong_threshold, max_strong, max_
         lines.append(f"🤔 <b>Maybe ({len(maybe)})</b>")
         for score, reasons, metros, item in maybe:
             url = html.escape(get_primary_url(item), quote=True)
-            why = f" · <i>{esc(' · '.join(reasons))}</i>" if reasons else ""
+            why = f" · <i>{esc(' · '.join(reasons) or 'no company signals found')}</i>"
             lines.append(f"• {esc(item['company_name'])} — <a href=\"{url}\">{esc(item['title'])}</a>"
                          f" · {esc(' / '.join(metros))}{why}")
     if held_back:

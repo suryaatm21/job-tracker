@@ -308,6 +308,44 @@ class RenderTest(unittest.TestCase):
         self.assertEqual(len(shown), 2)  # the held-back listing is not marked as sent
 
 
+class CircuitBreakerTest(unittest.TestCase):
+    def test_lookups_stop_after_consecutive_errors(self):
+        calls = []
+
+        def blocked(url):
+            calls.append(url)
+            raise requests.ConnectionError("blocked")
+
+        tmp = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, tmp)
+        profiles = CompanyProfiles(pathlib.Path(tmp) / "p.json", fetch_page=blocked, delay_seconds=0, now_epoch=NOW)
+        with mock.patch("builtins.print"):
+            statuses = [profiles.lookup({"company_name": n})[1] for n in "ABCDE"]
+        self.assertEqual(statuses, [profiles.PROFILE_NONE] * 5)  # scored without profiles, never deferred
+        self.assertEqual(len(calls), CompanyProfiles.MAX_CONSECUTIVE_ERRORS)
+        self.assertTrue(profiles.disabled)
+
+
+class DedupTest(unittest.TestCase):
+    def test_company_title_merges_only_name_prefixes(self):
+        def job(company, title, url):
+            return {"company_name": company, "title": title, "url": url, "_source": "s", "_level": LEVEL_INTERN}
+
+        items = [
+            job("Varda", "Site Reliability Internship", "https://a.test/1"),
+            job("Varda Space", "Site Reliability Internship", "https://zapply.test/1"),
+            job("General Motors", "Software Engineering Intern", "https://gm.test/1"),
+            job("General Dynamics", "Software Engineering Intern", "https://gd.test/1"),
+            job("Other Name", "Different", "https://a.test/1"),  # same URL as the first: merged
+        ]
+        funnel = digest.Funnel(["s"])
+        groups = digest.dedup_groups(items, funnel)
+        self.assertEqual([(g[0]["company_name"], len(g[1])) for g in groups],
+                         [("Varda", 2), ("General Motors", 0), ("General Dynamics", 0)])
+        self.assertEqual(funnel.drops["dedup:company_title"][LEVEL_INTERN], 1)
+        self.assertEqual(funnel.drops["dedup:url"][LEVEL_INTERN], 1)
+
+
 class DigestRunTest(unittest.TestCase):
     """End-to-end dry runs with fetches mocked; covers Supra's Instagram feed contract."""
 
