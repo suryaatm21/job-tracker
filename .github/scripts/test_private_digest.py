@@ -150,6 +150,16 @@ class LocationTest(unittest.TestCase):
         self.assertEqual(c({"locations": ["Seattle, WA"], "has_hidden_locations": True})[0], LOCATION_UNKNOWN)
         self.assertEqual(c({"locations": ["Seattle, WA"]})[0], LOCATION_ELSEWHERE)
 
+    def test_one_cell_listing_several_metros_keeps_them_all(self):
+        c = self.matcher.classify
+        # "San Francisco, CA • New York, NY" is a live speedyapply/zapply cell
+        for cell in ["San Francisco, CA / New York, NY", "San Francisco, CA • New York, NY", "SF/NYC"]:
+            with self.subTest(cell=cell):
+                self.assertEqual(c({"locations": [cell]}), (LOCATION_MATCH, ["SF Bay Area", "NYC"]))
+        self.assertEqual(c({"locations": ["New York, NY; Remote"]}), (LOCATION_MATCH, ["NYC"]))
+        self.assertEqual(c({"locations": ["Seattle, WA or Austin, TX"]}), (LOCATION_MATCH, ["Austin"]))
+        self.assertEqual(c({"locations": ["Remote - San Francisco, CA"]})[0], LOCATION_REMOTE)  # remote job, excluded
+
     def test_remote_switch(self):
         cfg = dict(CONFIG["location"], include_remote=True)
         self.assertEqual(LocationMatcher(cfg).classify({"locations": ["Remote in USA"]}), (LOCATION_MATCH, ["Remote"]))
@@ -161,6 +171,8 @@ class PayTest(unittest.TestCase):
             "$120,000 - $180,000": ("yr", 180000), "$150K-$200K": ("yr", 200000), "$186k/yr": ("yr", 186000),
             "$55/hr": ("hr", 55), "$50 - $60 per hour": ("hr", 60), "120000-150000 USD yearly": ("yr", 150000),
             "$8,000 per month": ("mo", 8000), "$60/hr": ("hr", 60),
+            # One dollar sign covering both ends of the range
+            "$45-55/hr": ("hr", 55), "$120,000-160,000 per year": ("yr", 160000), "$120-160k": ("yr", 160000),
         }
         for text, (unit, top) in cases.items():
             with self.subTest(text=text):
@@ -181,6 +193,9 @@ class PayTest(unittest.TestCase):
         self.assertTrue(passes_pay_gate(parse_pay("$120,000 - $140,000"), LEVEL_NEW_GRAD, gate))
         self.assertFalse(passes_pay_gate(parse_pay("$110K-$139K"), LEVEL_NEW_GRAD, gate))
         self.assertTrue(passes_pay_gate(parse_pay("$50/hr"), LEVEL_INTERN, gate))
+        self.assertTrue(passes_pay_gate(parse_pay("$45-55/hr"), LEVEL_INTERN, gate))  # top 55 clears 50
+        self.assertTrue(passes_pay_gate(parse_pay("$120,000-160,000 per year"), LEVEL_NEW_GRAD, gate))
+        self.assertFalse(passes_pay_gate(parse_pay("$100-130k"), LEVEL_NEW_GRAD, gate))
         self.assertFalse(passes_pay_gate(parse_pay("$45/hr"), LEVEL_INTERN, gate))
         self.assertTrue(passes_pay_gate(parse_pay(""), LEVEL_NEW_GRAD, gate))
         self.assertTrue(passes_pay_gate(parse_pay("competitive"), LEVEL_INTERN, gate))
@@ -329,9 +344,9 @@ class CircuitBreakerTest(unittest.TestCase):
 class DedupTest(unittest.TestCase):
     TTL = 14 * 86400
 
-    def job(self, company, title, url, metros, source="s"):
+    def job(self, company, title, url, metros, source="s", level=LEVEL_NEW_GRAD):
         return {"company_name": company, "title": title, "url": url, "_source": source,
-                "_level": LEVEL_NEW_GRAD, "_metros": metros}
+                "_level": level, "_metros": metros}
 
     def run_dedup(self, items, seen=None):
         funnel = digest.Funnel(["s", "t"])
@@ -371,6 +386,32 @@ class DedupTest(unittest.TestCase):
             self.job("Amazon Web Services", "SDE New Grad", "https://a.test/2", ["NYC"])])
         self.assertEqual([i["company_name"] for i in kept], ["Amazon", "Amazon Web Services"])
         self.assertEqual(funnel.drops["dedup:url"][LEVEL_NEW_GRAD], 1)
+
+    def test_postings_identified_by_query_stay_distinct(self):
+        # Live case: 88 Waymo listings link to careers.withwaymo.com/jobs?gh_jid=<posting id>
+        kept, _ = self.run_dedup([
+            self.job("Waymo", "Software Engineer", "https://careers.withwaymo.com/jobs?gh_jid=8350687", ["SF Bay Area"]),
+            self.job("Waymo", "Hardware Engineer", "https://careers.withwaymo.com/jobs?gh_jid=8350832", ["SF Bay Area"])])
+        self.assertEqual(len(kept), 2)
+        self.assertNotEqual(digest.canonical_url_key("https://careers.withwaymo.com/jobs?gh_jid=8350687"),
+                            digest.canonical_url_key("https://careers.withwaymo.com/jobs?gh_jid=8350832"))
+
+    def test_only_tracking_parameters_are_ignored(self):
+        same = ["https://jobs.test/a/1", "https://JOBS.test/a/1/?utm_source=x&utm_medium=y",
+                "https://jobs.test/a/1?ref=board&source=gh#apply", "https://jobs.test/a/1?gh_src=abc&src=feed"]
+        self.assertEqual(len({digest.canonical_url_key(u) for u in same}), 1)
+        self.assertEqual(digest.canonical_url_key("https://b.test/x?b=2&a=1"),
+                         digest.canonical_url_key("https://b.test/x?a=1&b=2&utm_campaign=z"))
+        kept, funnel = self.run_dedup([
+            self.job("Acme", "SWE", same[0], ["NYC"]), self.job("Other", "Other", same[2], ["Miami"])])
+        self.assertEqual(len(kept), 1)
+        self.assertEqual(funnel.drops["dedup:url"][LEVEL_NEW_GRAD], 1)
+
+    def test_intern_and_new_grad_with_same_title_stay_separate(self):
+        kept, _ = self.run_dedup([
+            self.job("Acme", "Software Engineer", "https://a.test/ng", ["NYC"], level=LEVEL_NEW_GRAD),
+            self.job("Acme", "Software Engineer", "https://a.test/in", ["NYC"], level=LEVEL_INTERN)])
+        self.assertEqual([i["_level"] for i in kept], [LEVEL_NEW_GRAD, LEVEL_INTERN])
 
     def test_seen_keys_suppress_only_within_ttl(self):
         item = self.job("Acme", "SWE", "https://a.test/1", ["NYC"])

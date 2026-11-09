@@ -79,6 +79,15 @@ LOCATION_UNKNOWN = "unknown"
 LOCATION_ELSEWHERE = "elsewhere"
 
 _SEPARATORS_RE = re.compile(r"[,;/|>()•·\-–—_]+")
+# Separators between whole locations inside one cell: "San Francisco, CA / New York, NY",
+# "San Francisco, CA • New York, NY", "New York, NY; Remote". A slash without spaces
+# ("SF/NYC", "Remote/Teleworker") and a hyphen ("Remote - Austin, TX") stay in one segment.
+_LOCATION_LIST_RE = re.compile(r"\s*(?:;|\||•|\s/\s|\s+or\s+)\s*", re.IGNORECASE)
+
+
+def split_location(location):
+    """One location string -> the separate locations it lists."""
+    return [seg for seg in _LOCATION_LIST_RE.split(str(location or "")) if seg.strip()]
 # Applied after digits are stripped, so "2 Locations" arrives as "locations"
 _UNKNOWN_RE = re.compile(r"^(locations?|multiple locations?|various locations?|multi location|tbd|n a|na)$")
 
@@ -136,26 +145,26 @@ class LocationMatcher:
         words = _SEPARATORS_RE.sub(" ", rest).split()
         return [w for w in words if w not in self.filler_tokens]
 
-    def match_one(self, location):
-        """Metro label for a single location string, or None."""
+    def _metro_matches(self, metro, text):
+        if any(p.search(text) for p in metro["cities"]):
+            return True
+        for pattern in metro["qualified"]:
+            for m in pattern.finditer(text):
+                rest = text[:m.start()] + " " + text[m.end():]
+                if any(s.search(rest) for s in metro["states"]) or not self._leftover(text, m.span()):
+                    return True
+        return any(m and not self._leftover(text, m.span())
+                   for m in (pattern.search(text) for pattern in metro["bare"]))
+
+    def match_all(self, location):
+        """Every metro label one location segment names, in config order ("SF/NYC" -> both)."""
         text = _norm_location(location)
-        if not text:
-            return None
-        for metro in self.metros:
-            if any(p.search(text) for p in metro["cities"]):
-                return metro["label"]
-            for pattern in metro["qualified"]:
-                for m in pattern.finditer(text):
-                    rest = text[:m.start()] + " " + text[m.end():]
-                    if any(s.search(rest) for s in metro["states"]):
-                        return metro["label"]
-                    if not self._leftover(text, m.span()):
-                        return metro["label"]
-            for pattern in metro["bare"]:
-                m = pattern.search(text)
-                if m and not self._leftover(text, m.span()):
-                    return metro["label"]
-        return None
+        return [metro["label"] for metro in self.metros if text and self._metro_matches(metro, text)]
+
+    def match_one(self, location):
+        """First metro label for a single location segment, or None."""
+        labels = self.match_all(location)
+        return labels[0] if labels else None
 
     def _is_unknown(self, location):
         text = _SEPARATORS_RE.sub(" ", _norm_location(location)).strip()
@@ -170,26 +179,20 @@ class LocationMatcher:
         remote and remote is excluded), LOCATION_UNKNOWN (no usable location,
         or the board hid extra locations behind "+N"), LOCATION_ELSEWHERE.
         """
-        locations = [str(l) for l in (item.get("locations") or []) if str(l or "").strip()]
+        segments = [seg for loc in (item.get("locations") or []) for seg in split_location(loc)]
         labels = []
-        remote_seen = False
-        for loc in locations:
-            text = _norm_location(loc)
-            if self._is_remote(text):
-                remote_seen = True
-                if not self.include_remote:
-                    continue
-                label = "Remote"
+        for seg in segments:
+            if self._is_remote(_norm_location(seg)):
+                found = ["Remote"] if self.include_remote else []
             else:
-                label = self.match_one(loc)
-            if label and label not in labels:
-                labels.append(label)
+                found = self.match_all(seg)
+            labels.extend(label for label in found if label not in labels)
 
         if labels:
             return LOCATION_MATCH, labels
-        if locations and remote_seen and all(self._is_remote(_norm_location(l)) for l in locations):
+        if segments and all(self._is_remote(_norm_location(seg)) for seg in segments):
             return LOCATION_REMOTE, []
-        if not locations or item.get("has_hidden_locations") or all(self._is_unknown(l) for l in locations):
+        if not segments or item.get("has_hidden_locations") or all(self._is_unknown(seg) for seg in segments):
             return LOCATION_UNKNOWN, []
         return LOCATION_ELSEWHERE, []
 
@@ -209,6 +212,9 @@ _PAY_UNITS = [
     ("wk", re.compile(r"/\s*w(ee)?k\b|\bper\s+week\b|\bweekly\b", re.I)),
 ]
 _DOLLAR_AMOUNT_RE = re.compile(r"\$\s*(\d[\d,]*(?:\.\d+)?)\s*([km])?(?![a-z])", re.I)
+# A range whose second end has no dollar sign: "$45-55/hr", "$120,000-160,000", "$120-160k"
+_DOLLAR_RANGE_RE = re.compile(
+    r"\$\s*(\d[\d,]*(?:\.\d+)?)\s*([km])?\s*(?:-|–|—|to)\s*\$?\s*(\d[\d,]*(?:\.\d+)?)\s*([km])?(?![a-z])", re.I)
 _BARE_AMOUNT_RE = re.compile(r"(?<![\w.])(\d[\d,]*(?:\.\d+)?)\s*([km])?(?![a-z])", re.I)
 _FOREIGN_CURRENCY_RE = re.compile(r"[£€₹¥]|\b(ca|c|a|au|nz|s|hk)\$|\b(cad|eur|gbp|inr|aud|sgd|jpy|chf)\b", re.I)
 _PERIODS_PER_YEAR = {"yr": 1, "mo": 12, "wk": 52}
@@ -228,7 +234,9 @@ def parse_pay(text, hours_per_year=2080):
     Parse posted pay into the top of the range, as yearly and hourly USD.
 
     Handles "$120,000 - $180,000", "$150K-$200K", "$186k/yr", "$55/hr",
-    "$50 - $60 per hour", "120000-150000 USD yearly". With no unit, values of
+    "$50 - $60 per hour", ranges with one dollar sign ("$45-55/hr",
+    "$120,000-160,000 per year", "$120-160k") and "120000-150000 USD yearly".
+    With no unit, values of
     10,000+ read as yearly and values up to 300 as hourly.
 
     Returns {"status": PAY_OK, "top", "unit", "yearly", "hourly"}, or
@@ -243,6 +251,9 @@ def parse_pay(text, hours_per_year=2080):
         return {"status": PAY_UNPARSED, "text": text}
 
     matches = _DOLLAR_AMOUNT_RE.findall(text)
+    for low, low_suffix, high, high_suffix in _DOLLAR_RANGE_RE.findall(text):
+        # A suffix written once covers both ends: "$120-160k" is 120k-160k
+        matches += [(low, low_suffix or high_suffix), (high, high_suffix or low_suffix)]
     if not matches and re.search(r"\busd\b", text, re.I):
         matches = _BARE_AMOUNT_RE.findall(text)
     values = []

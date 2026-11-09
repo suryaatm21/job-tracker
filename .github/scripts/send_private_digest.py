@@ -34,6 +34,7 @@ import re
 import sys
 import time
 from collections import defaultdict
+from urllib.parse import parse_qsl, urlencode, urlsplit
 
 import requests
 
@@ -244,11 +245,44 @@ def _title_key(item):
     return re.sub(r"[^a-z0-9]+", " ", (item.get("title") or "").lower()).strip()
 
 
+# Query parameters that only track where a click came from. Everything else in a
+# query string is kept, because some boards identify the posting there
+# (careers.withwaymo.com/jobs?gh_jid=8350687).
+_TRACKING_PARAMS = {
+    "ref", "ref_src", "referrer", "source", "src", "gh_src", "lever-source", "lever-origin",
+    "trk", "fbclid", "gclid", "mc_cid", "mc_eid", "_hsenc", "_hsmi",
+}
+
+
+def canonical_url_key(url):
+    """
+    Dedup key for an application link: lowercase scheme and host, path without a
+    trailing slash, and the query minus tracking parameters (utm_* and
+    _TRACKING_PARAMS), sorted. The fragment is dropped. Returns None for no URL.
+    """
+    url = (url or "").strip()
+    if not url:
+        return None
+    parts = urlsplit(url)
+    query = sorted((k, v) for k, v in parse_qsl(parts.query, keep_blank_values=True)
+                   if not (k.lower().startswith("utm_") or k.lower() in _TRACKING_PARAMS))
+    path = parts.path.rstrip("/")
+    key = f"{parts.scheme.lower()}://{parts.netloc.lower()}{path}"
+    return f"{key}?{urlencode(query)}" if query else key
+
+
 def listing_keys(item):
-    """Canonical URL key plus one company+title key per gated metro of the listing."""
+    """
+    Canonical URL key plus one company+title+level key per gated metro of the
+    listing. The level keeps an intern and a new-grad posting with the same title
+    apart. Listings without a URL fall back to the shared cache key (id, then
+    company+title).
+    """
     company, title = normalize_company(item.get("company_name")), _title_key(item)
-    url_key = get_cache_key(item)
-    return ([url_key] if url_key else []), [f"ct:{company}|{title}|{metro}" for metro in item.get("_metros") or []]
+    url_key = canonical_url_key(get_primary_url(item)) or get_cache_key(item)
+    level = item.get("_level") or ""
+    metro_keys = [f"ct:{company}|{title}|{level}|{metro}" for metro in item.get("_metros") or []]
+    return ([url_key] if url_key else []), metro_keys
 
 
 def drop_seen_and_duplicates(items, seen, ttl_seconds, now_epoch, funnel):
