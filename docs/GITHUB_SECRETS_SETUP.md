@@ -35,8 +35,8 @@ Add these 5 new secrets to enable the multi-channel digest workflows:
 ### 4. TELEGRAM_CHAT_ID_CHANNEL_SWE_ML_PHD
 - **Name:** `TELEGRAM_CHAT_ID_CHANNEL_SWE_ML_PHD`
 - **Value:** Your private job-tracker channel chat ID (from `.env`; this was the PhD channel)
-- **Used by:** no workflow in this repo yet (the Graduate Degrees digest was retired)
-- **Purpose:** Private job-tracker channel
+- **Used by:** `channel-digest-private.yml` (the private job tracker digest)
+- **Purpose:** Private job-tracker channel. See [Private job tracker channel](#private-job-tracker-channel)
 
 ### 5. TELEGRAM_CHAT_ID_CHANNEL (verify exists)
 - **Name:** `TELEGRAM_CHAT_ID_CHANNEL`
@@ -44,6 +44,17 @@ Add these 5 new secrets to enable the multi-channel digest workflows:
 - **Used by:** `channel-digest.yml`
 - **Purpose:** SWE/ML jobs for Bachelor's degrees
 - **Note:** This should already exist - just verify it's set
+
+---
+
+## Private job tracker channel
+
+`channel-digest-private.yml` posts new grad and intern listings for SF Bay Area, NYC, Los Angeles, Austin and Miami, scored by company signals. It reuses the old PhD channel instead of a new one:
+
+- **No new secret.** The workflow maps `TELEGRAM_CHAT_ID_CHANNEL_SWE_ML_PHD` to the script's `PRIVATE_DIGEST_CHAT_ID` and never reads `TELEGRAM_CHAT_ID` (the DM chat) or the public channel secrets.
+- **Bot access.** The bot is already an admin of that channel, so nothing changes in Telegram except the name.
+- **Privacy.** The channel was public-facing: existing subscribers stay subscribed and its invite link was published in the README. If the digest should be private, revoke the old invite link and remove other subscribers in Telegram (channel settings → Invite Links / Subscribers).
+- **If the secret is missing**, the private digest logs a warning and exits successfully without sending.
 
 ---
 

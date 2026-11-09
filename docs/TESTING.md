@@ -99,6 +99,25 @@ Ensure GitHub repository secrets are configured:
 - Cache keys use weekly prefixes (e.g., `dm-watcher-state-v1-2025-W40-...`)
 - State files stored in `.state/` directory
 
+### 6. Private Job Tracker Digest
+
+**Offline tests** (no network, no Telegram; covers the markdown reader, location and pay gates, tiers, scoring, the Simplify profile cache, and Supra's Instagram feed including the missing-file case):
+
+```bash
+python -m unittest discover -s .github/scripts -p 'test_private_digest.py'
+```
+
+**Dry run against live data** (sends nothing and leaves `seen.json` untouched; prints per-source/per-level counts after each stage, drops per gate, pay coverage, and the rendered messages):
+
+```bash
+export GH_TOKEN="your_token"
+DRY_RUN=true STATE_DIR=/tmp/private-digest-state DRY_RUN_REPORT=/tmp/private-digest.json \
+  python .github/scripts/send_private_digest.py
+# Wider sample: add FORCE_WINDOW_HOURS=168 MAX_PROFILE_LOOKUPS=250
+```
+
+In Actions, a manual run of "Channel Digest (Private - Job Tracker)" defaults to `dry_run=true`.
+
 ## Validation Commands
 
 ### Check logs in Actions:

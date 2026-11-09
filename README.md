@@ -72,12 +72,13 @@ Environment variables in workflows:
   - Hardware digest: `.state/channel-digest-hardware`
   - Quant digest: `.state/channel-digest-quant`
   - PM digest: `.state/channel-digest-pm`
+  - Private job tracker digest: `.state/channel-digest-private` (also holds the Simplify company-profile cache)
 - **Why weekly keys**: GitHub Actions caches are immutable. To persist evolving state mid‑week, we use per‑run keys with a weekly prefix and rely on `restore-keys` to load the latest one.
 - **Key format**:
   - `dm-watcher-state-v1-<ISO_WEEK>-<run_id>`
   - `channel-digest-state-v1-<ISO_WEEK>-<run_id>`
   - `channel-digest-testing-state-v1-<ISO_WEEK>-<run_id>`
-  - `channel-digest-{hardware,quant,pm}-state-v1-<ISO_WEEK>-<run_id>`
+  - `channel-digest-{hardware,quant,pm,private}-state-v1-<ISO_WEEK>-<run_id>`
 - **Restore strategy**: Prefer the newest cache for the current ISO week, then fall back to earlier weeks via `restore-keys`.
 - **Save strategy**: Always save a new cache at the end of a run (immutable), then prune old caches with a cleanup workflow (below).
 - For TTL details, see `docs/TTL_IMPLEMENTATION.md`.
@@ -104,6 +105,14 @@ Note on reopen/grace window: the watcher uses a short "reopen" grace window (def
 - **Purpose**: Role-specific batched summaries (all degree levels)
 - **Features**: Category filtering, 24-hour windows. See [docs/CANONICAL_CATEGORIES.md](docs/CANONICAL_CATEGORIES.md) for category details.
 
+### Private Job Tracker Digest (`.github/workflows/channel-digest-private.yml`)
+
+- **Schedule**: Every 2 hours at :20; manual runs default to a dry run that sends nothing
+- **Destination**: the repurposed PhD channel, renamed "job tracker" (secret `TELEGRAM_CHAT_ID_CHANNEL_SWE_ML_PHD`; see [docs/GITHUB_SECRETS_SETUP.md](docs/GITHUB_SECRETS_SETUP.md#private-job-tracker-channel))
+- **Config**: `.github/private_channel/config.json` holds the sources (one entry per feed, including Supra16/JobTracker's Instagram Stories feed, skipped until it exists), the metro city lists, the pay floor and the score weights; `company_tiers.json` holds the company tiers.
+- **Hard gates**: location (SF Bay Area, NYC, Los Angeles, Austin, Miami) and, only when a listing states pay, a pay floor.
+- **Scoring** (soft, never drops a listing): company tiers, funding rounds and investors from each company's Simplify page, posted pay, and penalties for PhD/MS-only and off-target roles. Each level (new grad, intern, unknown) gets a "Strong signal" section that shows why each listing scored, plus a compact "Maybe" section.
+
 ### Channel Digest Testing (`.github/workflows/channel-digest-testing.yml`)
 
 - **Schedule**: Every hour
@@ -115,7 +124,7 @@ Note on reopen/grace window: the watcher uses a short "reopen" grace window (def
 - **Schedule**: Daily at 08:00 UTC; also supports manual runs (`workflow_dispatch`).
 - **Purpose**: Prune immutable caches to keep only the newest N per managed prefix and delete non‑matching caches.
 - **Defaults**:
-  - Keep prefixes: `dm-watcher-state-v1, channel-digest-state-v1, channel-digest-testing-state-v1, channel-digest-hardware-state-v1, channel-digest-quant-state-v1, channel-digest-pm-state-v1`
+  - Keep prefixes: `dm-watcher-state-v1, channel-digest-state-v1, channel-digest-testing-state-v1, channel-digest-hardware-state-v1, channel-digest-quant-state-v1, channel-digest-pm-state-v1, channel-digest-private-state-v1`
   - Keep N per prefix: `3`
 - **Manual inputs**:
   - `dry_run` (true/false): list without deleting

@@ -1,0 +1,381 @@
+#!/usr/bin/env python3
+"""
+Offline tests for the private opportunity digest. No network, no Telegram.
+
+Run: python -m unittest discover -s .github/scripts -p 'test_private_digest.py'
+"""
+import json
+import pathlib
+import re
+import shutil
+import tempfile
+import time
+import unittest
+from unittest import mock
+
+import requests
+
+import company_signals
+import send_private_digest as digest
+from company_signals import CompanyProfiles, parse_simplify_company_page, score_listing, guess_simplify_slug
+from markdown_listings import parse_markdown_tables, approximate_posted_epoch
+from opportunity_filters import (LocationMatcher, CompanyTiers, tag_level, normalize_company, parse_pay,
+                                 passes_pay_gate, is_graduate_only, LEVEL_INTERN, LEVEL_NEW_GRAD,
+                                 LEVEL_UNKNOWN, LOCATION_MATCH, LOCATION_REMOTE, LOCATION_UNKNOWN,
+                                 LOCATION_ELSEWHERE, PAY_OK, PAY_NONE, PAY_UNPARSED)
+
+HERE = pathlib.Path(__file__).resolve().parent
+CONFIG_DIR = HERE.parent / "private_channel"
+CONFIG = json.loads((CONFIG_DIR / "config.json").read_text())
+NOW = 1_794_200_000  # 2026-11-09
+
+
+def not_found():
+    response = requests.Response()
+    response.status_code = 404
+    return requests.HTTPError("404 Not Found", response=response)
+
+
+class MarkdownTablesTest(unittest.TestCase):
+    SPEEDY = """
+### FAANG+
+
+| Company | Position | Location | Salary | Posting | Age |
+|---|---|---|---|---|---|
+| <a href="https://www.figma.com"><strong>Figma</strong></a> | PhD Intern - Software Engineer | San Francisco, CA +1 | $60/hr | <a href="https://boards.greenhouse.io/figma/jobs/1"><img src="x" alt="Apply"/></a> | 4d |
+| <a href="https://www.mtb.com"><strong>M&amp;T Bank</strong></a> | Data &amp; API Engineer | Buffalo, NY | | <a href="https://mtb.example/2"><img src="x"/></a> | 1mo |
+"""
+    ZAPPLY = """
+<details>
+<summary><h3>💻 <strong>Software Engineering</strong></h3></summary>
+
+| Company | Role | Location | Posted | Visa | **Apply** |
+|---------|------|----------|--------|------|----------|
+| **Nominal** | Product Manager | New York, United States | 7h |  | [<img src="images/apply.png">](https://zapply.jobs/l/d/a?s=gh) |
+| ↳ | Software Engineer \\[Summer 2027\\] | NYC | 2026-11-01 | ✅ | [<img src="images/apply.png">](https://zapply.jobs/l/d/b?s=gh) |
+| **NoLink** | Engineer | NYC | 1d | | |
+</details>
+"""
+
+    def test_speedyapply_rows(self):
+        rows = parse_markdown_tables(self.SPEEDY, now_epoch=NOW)
+        self.assertEqual(len(rows), 2)
+        figma = rows[0]
+        self.assertEqual(figma["company_name"], "Figma")
+        self.assertEqual(figma["url"], "https://boards.greenhouse.io/figma/jobs/1")
+        self.assertEqual(figma["locations"], ["San Francisco, CA"])
+        self.assertTrue(figma["has_hidden_locations"])
+        self.assertEqual(figma["salary"], "$60/hr")
+        self.assertEqual(figma["category"], "FAANG+")
+        self.assertEqual(figma["date_posted"], NOW - 4 * 86400)
+        self.assertEqual(rows[1]["company_name"], "M&T Bank")  # entities unescaped
+        self.assertEqual(rows[1]["title"], "Data & API Engineer")
+
+    def test_zapply_rows_continuation_and_skips(self):
+        rows = parse_markdown_tables(self.ZAPPLY, now_epoch=NOW)
+        self.assertEqual([r["company_name"] for r in rows], ["Nominal", "Nominal"])  # ↳ repeats; no-link row skipped
+        self.assertEqual(rows[0]["category"], "Software Engineering")
+        self.assertEqual(rows[0]["url"], "https://zapply.jobs/l/d/a?s=gh")
+        self.assertEqual(rows[0]["date_posted"], NOW - 7 * 3600)
+        self.assertEqual(rows[1]["date_posted"], 1793491200)  # 2026-11-01 UTC
+        self.assertEqual(rows[1]["title"], "Software Engineer [Summer 2027]")  # markdown escapes removed
+
+    def test_unknown_age(self):
+        self.assertIsNone(approximate_posted_epoch("Date unknown", NOW))
+
+
+class LevelTest(unittest.TestCase):
+    def test_title_overrides_source_default(self):
+        self.assertEqual(tag_level({"title": "Engineer 2 New Grad"}, LEVEL_INTERN), LEVEL_NEW_GRAD)
+        self.assertEqual(tag_level({"title": "Software Intern - Summer 2027"}, LEVEL_NEW_GRAD), LEVEL_INTERN)
+        self.assertEqual(tag_level({"title": "Internal Tools Engineer"}, LEVEL_NEW_GRAD), LEVEL_NEW_GRAD)
+
+    def test_both_or_neither_keeps_default(self):
+        self.assertEqual(tag_level({"title": "Software Engineer"}, LEVEL_INTERN), LEVEL_INTERN)
+        self.assertEqual(tag_level({"title": "New Grad / Intern SWE"}, LEVEL_UNKNOWN), LEVEL_UNKNOWN)
+
+    def test_explicit_level_field_wins(self):
+        self.assertEqual(tag_level({"title": "Software Engineer", "level": "new grad"}, LEVEL_UNKNOWN), LEVEL_NEW_GRAD)
+        self.assertEqual(tag_level({"title": "Engineer", "level": "Intern"}, LEVEL_UNKNOWN), LEVEL_INTERN)
+        self.assertEqual(tag_level({"title": "Engineer", "level": "unsure"}, LEVEL_UNKNOWN), LEVEL_UNKNOWN)
+
+    def test_graduate_only(self):
+        self.assertTrue(is_graduate_only({"title": "Research Intern - PhD"}))
+        self.assertTrue(is_graduate_only({"title": "SWE", "degrees": ["Master's", "PhD"]}))
+        self.assertFalse(is_graduate_only({"title": "SWE", "degrees": ["Bachelor's", "Master's"]}))
+        self.assertFalse(is_graduate_only({"title": "SWE", "degrees": []}))
+
+
+class LocationTest(unittest.TestCase):
+    matcher = LocationMatcher(CONFIG["location"])
+
+    def label(self, location):
+        return self.matcher.match_one(location)
+
+    def test_metro_matches(self):
+        cases = {
+            "SF": "SF Bay Area", "South SF": "SF Bay Area", "San Jose, CA": "SF Bay Area",
+            "San Jose California US": "SF Bay Area", "USA - CA - San Jose": "SF Bay Area",
+            "San Jose": "SF Bay Area", "Santa Clara,CA": "SF Bay Area", "San Francisco, CA, US": "SF Bay Area",
+            "NYC": "NYC", "New York, NY": "NYC", "New York, United States": "NYC", "US, NY, New York": "NYC",
+            "New York, New York, United...": "NYC", "Brooklyn, NY": "NYC", "Long Island City, Queens, NY": "NYC",
+            "LA": "Los Angeles", "Los Angeles, CA": "Los Angeles", "El Segundo, CA": "Los Angeles",
+            "Playa Vista, LA": "Los Angeles", "Irvine, CA": "Los Angeles", "Manhattan Beach, CA": "Los Angeles",
+            "Austin, TX": "Austin", "AUSTIN, TX": "Austin", "Austin, Texas, USA, 78744": "Austin", "Round Rock, TX": "Austin",
+            "Miami, FL": "Miami", "Fort Lauderdale, FL": "Miami", "Hollywood, FL": "Miami",
+        }
+        for location, expected in cases.items():
+            with self.subTest(location=location):
+                self.assertEqual(self.label(location), expected)
+
+    def test_lookalikes_do_not_match(self):
+        for location in ["USA - New York - Malta", "Rochester, NY", "Holtsville, New York",
+                         "Brooklyn, OH", "Brooklyn Park, MN", "Dublin, Ireland", "Newark, NJ", "Berkeley Heights, NJ",
+                         "San Jose, Costa Rica", "Baton Rouge, LA", "La Jolla, San Diego, CA", "Bossier City, LA",
+                         "Miamisburg, OH", "Richmond, VA", "Glendale, CO", "Austin RiverSouth", "Seattle, WA"]:
+            with self.subTest(location=location):
+                self.assertIsNone(self.label(location))
+
+    def test_classify_outcomes(self):
+        c = self.matcher.classify
+        self.assertEqual(c({"locations": ["Seattle, WA", "New York, NY"]}), (LOCATION_MATCH, ["NYC"]))
+        self.assertEqual(c({"locations": ["Remote in USA"]})[0], LOCATION_REMOTE)
+        self.assertEqual(c({"locations": ["Remote - San Francisco, CA"]})[0], LOCATION_REMOTE)
+        self.assertEqual(c({"locations": ["2 Locations"]})[0], LOCATION_UNKNOWN)
+        self.assertEqual(c({"locations": ["United States"]})[0], LOCATION_UNKNOWN)
+        self.assertEqual(c({"locations": []})[0], LOCATION_UNKNOWN)
+        self.assertEqual(c({"locations": ["Seattle, WA"], "has_hidden_locations": True})[0], LOCATION_UNKNOWN)
+        self.assertEqual(c({"locations": ["Seattle, WA"]})[0], LOCATION_ELSEWHERE)
+
+    def test_remote_switch(self):
+        cfg = dict(CONFIG["location"], include_remote=True)
+        self.assertEqual(LocationMatcher(cfg).classify({"locations": ["Remote in USA"]}), (LOCATION_MATCH, ["Remote"]))
+
+
+class PayTest(unittest.TestCase):
+    def test_formats(self):
+        cases = {
+            "$120,000 - $180,000": ("yr", 180000), "$150K-$200K": ("yr", 200000), "$186k/yr": ("yr", 186000),
+            "$55/hr": ("hr", 55), "$50 - $60 per hour": ("hr", 60), "120000-150000 USD yearly": ("yr", 150000),
+            "$8,000 per month": ("mo", 8000), "$60/hr": ("hr", 60),
+        }
+        for text, (unit, top) in cases.items():
+            with self.subTest(text=text):
+                pay = parse_pay(text)
+                self.assertEqual(pay["status"], PAY_OK)
+                self.assertEqual((pay["unit"], pay["top"]), (unit, top))
+        self.assertAlmostEqual(parse_pay("$55/hr")["yearly"], 55 * 2080)
+        self.assertAlmostEqual(parse_pay("$8,000 per month")["hourly"], 8000 * 12 / 2080)
+
+    def test_ambiguous_and_missing(self):
+        self.assertEqual(parse_pay("")["status"], PAY_NONE)
+        for text in ["£40,000", "CA$90,000", "competitive", "$1,500", "$50/hr or $120k/yr"]:
+            with self.subTest(text=text):
+                self.assertEqual(parse_pay(text)["status"], PAY_UNPARSED)
+
+    def test_gate(self):
+        gate = CONFIG["pay_gate"]
+        self.assertTrue(passes_pay_gate(parse_pay("$120,000 - $140,000"), LEVEL_NEW_GRAD, gate))
+        self.assertFalse(passes_pay_gate(parse_pay("$110K-$139K"), LEVEL_NEW_GRAD, gate))
+        self.assertTrue(passes_pay_gate(parse_pay("$50/hr"), LEVEL_INTERN, gate))
+        self.assertFalse(passes_pay_gate(parse_pay("$45/hr"), LEVEL_INTERN, gate))
+        self.assertTrue(passes_pay_gate(parse_pay(""), LEVEL_NEW_GRAD, gate))
+        self.assertTrue(passes_pay_gate(parse_pay("competitive"), LEVEL_INTERN, gate))
+        self.assertTrue(passes_pay_gate(parse_pay("$55/hr"), LEVEL_UNKNOWN, gate))  # clears the intern floor
+        self.assertFalse(passes_pay_gate(parse_pay("$40/hr"), LEVEL_UNKNOWN, gate))
+
+
+class CompanyTiersTest(unittest.TestCase):
+    tiers = CompanyTiers(json.loads((CONFIG_DIR / "company_tiers.json").read_text()))
+
+    def test_exact_alias_matching(self):
+        self.assertEqual(self.tiers.match("Meta")[0]["key"], "big_tech")
+        self.assertEqual(self.tiers.match("Facebook")[0]["key"], "big_tech")
+        self.assertEqual(self.tiers.match("Snap Inc.")[0]["key"], "comp")
+        self.assertEqual(self.tiers.match("ByteDance")[0]["key"], "big_tech")
+        for name in ["Metaview", "Applied Materials", "Apple Leisure Group", "Googleplex Foods", "Notional"]:
+            with self.subTest(name=name):
+                self.assertIsNone(self.tiers.match(name))
+
+    def test_every_entry_has_reason_and_source(self):
+        for tier in self.tiers.tiers:
+            for company in tier["companies"]:
+                with self.subTest(company=company["name"]):
+                    self.assertTrue(company.get("reason"))
+                    self.assertTrue(company.get("source"))
+
+    def test_normalize(self):
+        self.assertEqual(normalize_company("The New York Times"), "new york times")
+        self.assertEqual(normalize_company("M&T Bank"), "m and t bank")
+        self.assertEqual(guess_simplify_slug("M&T Bank"), "M-And-T-Bank")
+
+
+def simplify_page(company):
+    data = {"props": {"pageProps": {"company": company}}}
+    return f'<html><script id="__NEXT_DATA__" type="application/json">{json.dumps(data)}</script></html>'
+
+
+STARTUP = {
+    "name": "Acme Robotics", "stock_symbol": None, "funding_stage": "SERIES_B", "funding_total": 120_000_000,
+    "fundings": [
+        {"round": "SERIES_B", "amount": 80_000_000, "date": "2026-09-01T00:00:00",
+         "investors": [{"name": "Founders Fund", "is_top_investor": True}]},
+        {"round": "DEBT", "amount": 500_000_000, "date": "2026-10-01T00:00:00", "investors": []},
+        {"round": "SEED", "amount": 5_000_000, "date": "2021-01-01T00:00:00",
+         "investors": [{"name": "Old Angel", "is_top_investor": True}]},
+    ],
+}
+
+
+class ScoringTest(unittest.TestCase):
+    scoring = CONFIG["scoring"]
+    tiers = CompanyTiers(json.loads((CONFIG_DIR / "company_tiers.json").read_text()))
+
+    def test_unlisted_startup_earns_points_from_funding(self):
+        profile = parse_simplify_company_page(simplify_page(STARTUP))
+        score, reasons = score_listing({"title": "SWE"}, LEVEL_NEW_GRAD, None, profile, self.scoring, NOW)
+        # recent round (+2) + round >= $50M (+1) + top investor in 36 months (+1); debt ignored
+        self.assertEqual(score, 4)
+        self.assertIn("raised Series B $80M, Sep 2026", reasons)
+        self.assertIn("backed by Founders Fund", reasons)
+
+    def test_public_company_gets_no_funding_points(self):
+        profile = parse_simplify_company_page(simplify_page(dict(STARTUP, stock_symbol="ACME")))
+        self.assertEqual(score_listing({"title": "SWE"}, LEVEL_NEW_GRAD, None, profile, self.scoring, NOW), (0, []))
+
+    def test_tier_pay_and_penalties(self):
+        tier = self.tiers.match("Google")
+        score, reasons = score_listing({"title": "SWE", "salary": "$196k/yr"}, LEVEL_NEW_GRAD, tier, None, self.scoring, NOW)
+        self.assertEqual((score, reasons), (7, ["tier: big tech", "posted pay $196k/yr"]))
+        score, reasons = score_listing({"title": "Research Intern - PhD"}, LEVEL_INTERN, tier, None, self.scoring, NOW)
+        self.assertLess(score, self.scoring["strong_threshold"])
+        self.assertIn("PhD/MS only", reasons)
+        score, reasons = score_listing({"title": "Account Executive", "category": "Business & Operations"},
+                                       LEVEL_NEW_GRAD, None, None, self.scoring, NOW)
+        self.assertEqual(score, -3)
+        _, reasons = score_listing({"title": "SWE", "salary": "competitive"}, LEVEL_NEW_GRAD, None, None, self.scoring, NOW)
+        self.assertEqual(reasons, ["pay unparsed: competitive"])
+
+
+class CompanyProfilesTest(unittest.TestCase):
+    def setUp(self):
+        self.tmp = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, self.tmp)
+        self.pages = []
+
+    def fetch(self, url):
+        self.pages.append(url)
+        return None if url.endswith("/Missing-Co") else simplify_page(dict(STARTUP, name=url.rsplit("/", 1)[-1]))
+
+    def make(self, **kw):
+        return CompanyProfiles(pathlib.Path(self.tmp) / "profiles.json", fetch_page=self.fetch,
+                               delay_seconds=0, now_epoch=NOW, **kw)
+
+    def test_cache_slug_index_and_misses(self):
+        profiles = self.make()
+        profiles.register_listing({"company_name": "Acme", "company_url": "https://simplify.jobs/c/Acme-Robotics"})
+        profile, status = profiles.lookup({"company_name": "Acme"})
+        self.assertEqual((profile["name"], status), ("Acme-Robotics", profiles.PROFILE_FOUND))
+        self.assertEqual(profiles.lookup({"company_name": "Missing Co"}), (None, profiles.PROFILE_NONE))
+        profiles.save()
+
+        again = self.make()
+        again.lookup({"company_name": "Acme"})
+        again.lookup({"company_name": "Missing Co"})
+        self.assertEqual(len(self.pages), 2)  # both answered from cache, including the miss
+        self.assertEqual(again.cache_hits, 2)
+
+    def test_budget_defers_unknown_companies(self):
+        profiles = self.make(max_lookups=1)
+        profiles.lookup({"company_name": "First"})
+        self.assertEqual(profiles.lookup({"company_name": "Second"}), (None, profiles.PROFILE_DEFERRED))
+        group = [{"company_name": "Second"}, {"company_name": "First"}]
+        profile, status = profiles.lookup_group(group)  # another spelling in the group is already cached
+        self.assertEqual(status, profiles.PROFILE_FOUND)
+
+
+class RenderTest(unittest.TestCase):
+    def test_html_is_escaped_and_overflow_counted(self):
+        item = {"company_name": "M&T <Bank>", "title": "Data & API <Eng>", "url": "https://x.test/a?b=1&c=2"}
+        scored = [(5, ["tier: big tech"], ["NYC"], item), (0, [], ["NYC"], dict(item)), (0, [], ["NYC"], dict(item))]
+        header, lines, shown = digest.render_level(LEVEL_NEW_GRAD, scored, 48, 3, max_strong=40, max_maybe=1)
+        text = header + "\n".join(lines)
+        self.assertIn("M&amp;T &lt;Bank&gt;", text)
+        self.assertIn('href="https://x.test/a?b=1&amp;c=2"', text)
+        leftover = re.sub(r"</?(b|i)>|<a href=\"[^\"]*\">|</a>", "", text)
+        self.assertNotIn("<", leftover)  # only Telegram-safe tags remain
+        self.assertIn("1 lower-scored listings held", text)
+        self.assertEqual(len(shown), 2)  # the held-back listing is not marked as sent
+
+
+class DigestRunTest(unittest.TestCase):
+    """End-to-end dry runs with fetches mocked; covers Supra's Instagram feed contract."""
+
+    def setUp(self):
+        self.tmp = pathlib.Path(tempfile.mkdtemp())
+        self.addCleanup(shutil.rmtree, self.tmp)
+        config_dir = self.tmp / "config"
+        config_dir.mkdir()
+        shutil.copy(CONFIG_DIR / "company_tiers.json", config_dir / "company_tiers.json")
+        config = dict(CONFIG)
+        config["sources"] = [s for s in CONFIG["sources"] if s["name"] == "instagram:zero2sudo"]
+        self.assertEqual(len(config["sources"]), 1, "config.json must keep the instagram:zero2sudo source")
+        (config_dir / "config.json").write_text(json.dumps(config))
+
+        now = int(time.time())
+        feed = json.loads((HERE / "fixtures" / "instagram_feed.json").read_text())
+        for entry in feed:
+            entry["date_posted"] = now - 3600
+        self.feed = feed
+        self.report = self.tmp / "report.json"
+
+        patches = [
+            mock.patch.object(digest, "CONFIG_DIR", config_dir),
+            mock.patch.object(digest, "STATE_DIR", self.tmp / "state"),
+            mock.patch.object(digest, "DRY_RUN", True),
+            mock.patch.object(digest, "DRY_RUN_REPORT", str(self.report)),
+            mock.patch.object(digest, "get_default_branch", return_value="main"),
+            mock.patch.object(company_signals.CompanyProfiles, "_http_get", staticmethod(lambda url: None)),
+        ]
+        for p in patches:
+            p.start()
+            self.addCleanup(p.stop)
+
+    def run_digest(self, file_exists):
+        def gh_get(url, **params):
+            self.assertIn("repos/Supra16/JobTracker/contents/feed/listings.json", url)
+            if not file_exists:
+                raise not_found()
+            return {"name": "listings.json"}
+
+        with mock.patch.object(digest, "gh_get", side_effect=gh_get), \
+                mock.patch.object(digest, "fetch_file_json", return_value=self.feed) as fetch, \
+                mock.patch("builtins.print"):
+            ok = digest.main()
+        return ok, fetch
+
+    def test_instagram_feed_flows_through_gates_and_levels(self):
+        ok, fetch = self.run_digest(file_exists=True)
+        self.assertTrue(ok)
+        fetch.assert_called_once_with("Supra16/JobTracker", "feed/listings.json", "main")
+        report = json.loads(self.report.read_text())
+        levels = report["levels"]
+        self.assertEqual([s["company"] for s in levels["new_grad"]["scored"]], ["Stripe"])  # Seattle dropped
+        self.assertEqual([s["company"] for s in levels["intern"]["scored"]], ["Notion"])    # level from title
+        self.assertEqual([s["company"] for s in levels["unknown"]["scored"]], ["Some Seed Startup"])
+        self.assertIn("tier: promising startup", levels["new_grad"]["scored"][0]["reasons"])
+        self.assertIn("instagram:zero2sudo | new_grad | 2 | 2 | 2 | 1", report["funnel"])
+        self.assertFalse((self.tmp / "state" / "seen.json").exists())  # dry run never writes seen state
+
+    def test_missing_feed_is_skipped_quietly(self):
+        ok, fetch = self.run_digest(file_exists=False)
+        self.assertTrue(ok)
+        fetch.assert_not_called()
+        report = json.loads(self.report.read_text())
+        self.assertEqual(report["errors"], {})
+        self.assertIn("instagram:zero2sudo", report["skipped_optional_sources"])
+        self.assertEqual(report["levels"], {})
+
+
+if __name__ == "__main__":
+    unittest.main()
