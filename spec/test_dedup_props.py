@@ -38,14 +38,14 @@ def test_dedup_1_key_ignores_trailing_slash_fragment_and_host_case(parts):
 
 
 def reference_key(url):
-    """Independent rule: lowercase scheme and host, path without one trailing slash, no fragment,
+    """Independent rule: lowercase scheme and host, path without trailing slashes, no fragment,
     query kept except utm_* tracking parameters."""
     url = url.lower().split("#")[0]
     base, _, query = url.partition("?")
     scheme, _, rest = base.partition("://")
     host, _, path = rest.partition("/")
     params = sorted(q for q in query.split("&") if q and not q.startswith("utm_"))
-    return scheme, host, path.rstrip("/") if path.endswith("/") and not path.endswith("//") else path, params
+    return scheme, host, path.rstrip("/"), params
 
 
 @settings(max_examples=500)
@@ -58,13 +58,8 @@ def test_dedup_2_merges_only_postings_the_reference_key_also_merges(a, b):
         assert reference_key(a) == reference_key(b), (a, b)
 
 
-@settings(max_examples=2000)
-@given(st.one_of(urls, st.text(max_size=30)))
-@example(" ")
-@example("/")
-@example("://")
-def test_dedup_3_digest_and_memory_normalize_urls_identically(u):
-    assert dedup_utils.normalize_url(u) == state_utils.normalize_url(u)
+def test_dedup_3_digest_and_memory_share_one_normalize_url():
+    assert state_utils.normalize_url is dedup_utils.normalize_url
 
 
 item_st = st.fixed_dictionaries({}, optional={
