@@ -92,6 +92,7 @@ Note on reopen/grace window: the watcher uses a short "reopen" grace window (def
 - **Schedule**: Every 5 minutes
 - **Purpose**: Immediate alerts for new listings
 - **Features**: Commit-based change detection, 24-hour window, TTL deduplication
+- **Location gate**: Only listings with a location in the SF Bay Area or NYC (`DM_METROS`) reach the DM, matched by the private digest's metro rules in `.github/private_channel/config.json`. Remote-only and location-less listings are dropped. The run log prints drop counts per reason. Channel digests have no location gate. The manual `latest`, `today` and `recent` DM commands are intentionally not location-gated in this change; gating them is a tracked follow-up.
 
 ### Channel Digest (`.github/workflows/channel-digest.yml`)
 

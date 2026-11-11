@@ -150,6 +150,7 @@ python .github/scripts/send_digest_multi.py
 
 # DM watcher (fresh state scans the last 20 commits, so expect several large downloads):
 export WATCH_PATHS='["listings.json", ".github/scripts/listings.json"]'
+export DM_METROS='["SF Bay Area", "NYC"]'  # required; metro labels from .github/private_channel/config.json
 python .github/scripts/watch_repo.py
 ```
 
@@ -160,6 +161,14 @@ python -m unittest discover -s .github/scripts -p 'test_category_routing.py'
 ```
 
 Proves Simplify's `Hardware`/`Product`/`Quant` labels reach the matching role digests and never reach DM alerts. Needs `requests` installed (imported by `github_helper`).
+
+### DM location gate tests (no network):
+
+```bash
+python -m unittest discover -s .github/scripts -p 'test_dm_location_gate.py'
+```
+
+Proves DM alerts keep only SF Bay Area and NYC listings (a listing passes when any of its locations matches), drop remote-only and location-less listings, log drop counts per reason, and that the channel digest still keeps listings from other cities.
 
 ## Success Criteria
 
