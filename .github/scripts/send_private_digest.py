@@ -43,7 +43,7 @@ from repo_utils import get_default_branch, fetch_listings, DEFAULT_LISTINGS_PATH
 from dedup_utils import get_primary_url
 from state_utils import (load_seen, save_seen, get_cache_key,
                          should_include_item, parse_epoch)
-from telegram_utils import batch_send_message, is_dry_run
+from telegram_utils import batch_send_message, is_dry_run, safe_join_lines, send_message
 from markdown_listings import parse_markdown_tables
 from opportunity_filters import (tag_level, LocationMatcher, CompanyTiers, normalize_company,
                                  parse_pay, listing_pay_text, passes_pay_gate,
@@ -495,8 +495,6 @@ def main():
 
 def report_dry_run(rendered, funnel, strong_threshold):
     """Print what would be sent, plus a JSON report when DRY_RUN_REPORT is set."""
-    from telegram_utils import safe_join_lines
-
     print("\n===== DRY RUN: nothing sent, seen state unchanged =====")
     print(funnel.table())
     print()
@@ -510,8 +508,7 @@ def report_dry_run(rendered, funnel, strong_threshold):
         batches = safe_join_lines(header, lines, MAX_TELEGRAM_MESSAGE_CHARS)
         print(f"\n----- {level}: {len(posted)} listings in {len(batches)} message(s) -----")
         for b in batches:
-            print(b)
-            print("·····")
+            send_message(None, None, b, "HTML")  # DRY_RUN: logs a [DRY-SENT] record, sends nothing
         report["levels"][level] = {
             "messages": batches,
             "scored": [{"score": s, "reasons": r, "metros": m, "company": i["company_name"],

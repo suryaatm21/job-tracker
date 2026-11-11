@@ -61,6 +61,7 @@ Environment variables in workflows:
 - `TARGET_REPOS` – JSON array of repositories: `["owner1/repo1", "owner2/repo2"]`. Listings are read from each repo's actual default branch (both Summer2027-Internships repos use `dev`), resolved by `fetch_listings()` in `.github/scripts/repo_utils.py`.
 - `WINDOW_HOURS` – Time window for filtering (24 for most workflows; the private job tracker digest uses 48)
 - `SEEN_TTL_DAYS` – How long to remember alerted jobs (default 14; tune per workflow)
+- `TELEGRAM_CHAT_LABEL` – Chat name (`dm`, `swe`, `quant`, `pm`, `hardware`, `private`, `testing`) recorded in the `[SENT]` message log; each workflow sets its own. See `docs/TESTING.md`.
 - `DRY_RUN` – Set to `true` to print every Telegram message instead of sending it; the seen cache and last-seen SHAs are not saved. Only the private job tracker workflow sets it (from its `dry_run` input, default `true` for manual runs); see `docs/TESTING.md` for local dry runs.
 
 ### State & Caching (Immutable Actions Cache)

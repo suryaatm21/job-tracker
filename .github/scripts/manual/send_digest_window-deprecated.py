@@ -1,6 +1,7 @@
-import os, json, base64, requests
+import os, json, base64
 from datetime import datetime, timedelta, timezone
 from github_helper import fetch_file_json, debug_log, gh_get, GH
+from telegram_utils import send_message
 
 TARGET_REPO   = os.environ["TARGET_REPO"]
 LISTINGS_PATH = os.environ.get("LISTINGS_PATH","listings.json")
@@ -35,8 +36,7 @@ def parse_dt(s):
 def send(text):
     tok = os.getenv("TELEGRAM_BOT_TOKEN"); chat = os.getenv("TELEGRAM_CHAT_ID")
     if not tok or not chat: return
-    requests.post(f"https://api.telegram.org/bot{tok}/sendMessage",
-                  json={"chat_id": chat, "text": text, "disable_web_page_preview": True})
+    send_message(tok, chat, text)
 
 def main():
     now = datetime.now(timezone.utc)

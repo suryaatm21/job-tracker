@@ -35,6 +35,15 @@ CHANNELS = {
     "Job Tracker Channel (private, was PhD/MS)": "TELEGRAM_CHAT_ID_CHANNEL_SWE_ML_PHD",
 }
 
+# Chat label for the [SENT] log, matching each channel workflow's TELEGRAM_CHAT_LABEL
+CHAT_LABELS = {
+    "TELEGRAM_CHAT_ID_CHANNEL": "swe",
+    "TELEGRAM_CHAT_ID_CHANNEL_HARDWARE": "hardware",
+    "TELEGRAM_CHAT_ID_CHANNEL_QUANT": "quant",
+    "TELEGRAM_CHAT_ID_CHANNEL_PM": "pm",
+    "TELEGRAM_CHAT_ID_CHANNEL_SWE_ML_PHD": "private",
+}
+
 def check_channel(name, env_var):
     """Test sending a message to a single channel"""
     token = os.getenv("TELEGRAM_BOT_TOKEN")
@@ -50,7 +59,7 @@ def check_channel(name, env_var):
     
     test_message = f"🧪 Test message for {name}\n\nThis is a connectivity test. If you see this, the bot can send messages to this channel successfully! ✅"
     
-    success, status, body = send_message(token, chat_id, test_message)
+    success, status, body = send_message(token, chat_id, test_message, chat_label=CHAT_LABELS[env_var])
     
     if success:
         print(f"✅ {name}: Message sent successfully (status={status})")

@@ -152,7 +152,7 @@ Look for these log patterns:
 
 ### Dry run locally against live data (sends nothing):
 
-`DRY_RUN=true` makes every send path print the Telegram message instead of sending it, and skips saving the seen cache and last-seen SHAs. Unset the Telegram credentials too, so a send path that missed the switch still cannot reach Telegram.
+`DRY_RUN=true` makes every send path print the Telegram message (a `BEGIN/END MESSAGE` block plus a `[DRY-SENT]` record, see [Sent-message log](#sent-message-log)) instead of sending it, and skips saving the seen cache and last-seen SHAs. Unset the Telegram credentials too, so a send path that missed the switch still cannot reach Telegram.
 
 ```bash
 # Set environment variables:
@@ -189,6 +189,40 @@ python -m unittest discover -s .github/scripts -p 'test_dm_location_gate.py'
 ```
 
 Proves DM alerts keep only SF Bay Area and NYC listings (a listing passes when any of its locations matches), drop remote-only and location-less listings, log drop counts per reason, and that the channel digest still keeps listings from other cities.
+
+### Sent-message log
+
+Every Telegram message, from every workflow and manual script, goes through `send_message` in `.github/scripts/telegram_utils.py`, which writes one line per message to the run log:
+
+```text
+[SENT] {"chat": "dm", "dry_run": false, "ok": true, "message_id": 4242, "error": null, "chars": 92, "run_id": "1234567890", "sha": "0123…", "workflow": "DM fast watcher", "ts": "2026-11-11T10:12:32+00:00", "text": "🚨 <b>Example Co</b> — …"}
+```
+
+- `chat` is the workflow's `TELEGRAM_CHAT_LABEL` (`dm`, `swe`, `quant`, `pm`, `hardware`, `private`, `testing`), never the chat id; `unknown` if unset.
+- `ok`/`message_id` come from Telegram's response; on failure `ok` is `false` and `error` holds Telegram's description (token and chat id redacted).
+- `run_id`, `sha` and `workflow` come from `GITHUB_RUN_ID`, `GITHUB_SHA` and `GITHUB_WORKFLOW`; `text` is the full message.
+- Under `DRY_RUN` the line starts `[DRY-SENT]` with `dry_run: true` and `ok: null`; the keys are the same.
+- Each script also prints one `[SENT-SUMMARY] {"chat": …, "messages": N, "failures": N, …}` line per chat when it exits. A workflow with several send steps prints one per step; group by `run_id` to total them.
+
+**Auditing live output.** `extract_sent_log.py` reads recent runs of one workflow with `gh` and prints the records as JSONL, newest run first:
+
+```bash
+python .github/scripts/extract_sent_log.py dm-fast-watch.yml --limit 10 > sent.jsonl
+python .github/scripts/extract_sent_log.py channel-digest-private.yml --include-dry   # include dry runs
+python .github/scripts/extract_sent_log.py --log-file run.log                        # a saved `gh run view --log`
+
+# Failed sends, and the last 3 messages to a chat:
+jq -c 'select(.ok == false) | {run_id, chat, error}' sent.jsonl
+jq -r 'select(.chat == "dm") | .text' sent.jsonl | head -n 3
+```
+
+To check for a regression, diff the `text` of new records against an earlier run's, or look for failed sends and unexpected `chars` or empty fields. Logs exist only for runs GitHub still retains, and runs in progress are skipped.
+
+**Tests** (no network): valid JSON with emoji and HTML, no token or chat id in any line, dry and live share the format, the summary counts, and the extractor parses `fixtures/sent_log_sample.txt`:
+
+```bash
+python -m unittest discover -s .github/scripts -p 'test_sent_log.py'
+```
 
 ## Success Criteria
 
