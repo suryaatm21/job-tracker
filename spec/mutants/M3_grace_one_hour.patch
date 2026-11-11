@@ -1,13 +1,13 @@
 diff --git a/.github/scripts/state_utils.py b/.github/scripts/state_utils.py
-index fdbcff5..09f4f55 100644
+index 1e09fb4..1c70db2 100644
 --- a/.github/scripts/state_utils.py
 +++ b/.github/scripts/state_utils.py
 @@ -12,7 +12,7 @@ from datetime import datetime, timezone
- from urllib.parse import urlparse
+ from dedup_utils import get_primary_url, normalize_url
  
  # Reopen detection grace period - prevents identical re-additions from bypassing TTL
 -REOPEN_GRACE_PERIOD = 86400  # 1 day in seconds
 +REOPEN_GRACE_PERIOD = 3600  # 1 day in seconds
  
- def get_primary_url(item):
-     """Return the canonical URL for a listing (url or application_link)."""
+ def get_cache_key(item):
+     """Get consistent cache key: normalized_url -> id -> (company.lower(), title.lower())"""

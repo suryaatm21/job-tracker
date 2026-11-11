@@ -20,7 +20,7 @@ import os, sys
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import json
 from datetime import datetime, timezone
-from urllib.parse import urlparse
+from dedup_utils import get_dedup_key
 from repo_utils import fetch_listings
 from telegram_utils import send_message
 from format_utils import format_location, format_job_line
@@ -38,36 +38,6 @@ MESSAGE_PREFIX = os.getenv("MESSAGE_PREFIX", "")  # Context prefix for messages
 LISTINGS_PATH = os.getenv("LISTINGS_PATH", "listings.json")
 DATE_FIELD = os.getenv("DATE_FIELD", "date_posted")
 DATE_FALLBACK = os.getenv("DATE_FALLBACK", "date_updated")
-
-def normalize_url(url):
-    """Normalize URL to scheme+host+path for deduplication"""
-    if not url:
-        return None
-    try:
-        parsed = urlparse(url)
-        # Keep scheme, netloc (host), and path; drop query and fragment
-        return f"{parsed.scheme}://{parsed.netloc}{parsed.path}".rstrip('/')
-    except Exception:
-        return url
-
-def get_dedup_key(item):
-    """Get deduplication key: normalized_url -> id -> (company.lower(), title.lower())"""
-    # Prioritize URL over ID since IDs conflict between repos but URLs are more reliable
-    norm_url = normalize_url(item.get("url"))
-    if norm_url:
-        return ("url", norm_url)
-    
-    # Only use ID if URL is not available (lower priority due to conflicts)
-    if item.get("id"):
-        return ("id", item["id"])
-    
-    # Final fallback to company+title combination
-    company = (item.get("company_name", "") or "").lower().strip()
-    title = (item.get("title", "") or "").lower().strip()
-    if company and title:
-        return ("company_title", (company, title))
-    
-    return None
 
 def get_unified_season(item):
     """Get unified season label: season field or first term or empty string"""

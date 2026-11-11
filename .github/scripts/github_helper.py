@@ -28,6 +28,7 @@ _PREFIX_LEVELS = {
     "[CONFIG]": "INFO",
     "[INFO]": "INFO",
     "[MIGRATE]": "INFO",
+    "[REBUILD]": "INFO",
     "[TELEGRAM]": "INFO",
     "[CACHE]": "INFO",
     "[WINDOW]": "INFO",
@@ -87,6 +88,8 @@ def fetch_file_content(repo, path, ref=None):
     """
     debug_log(f"Fetching {repo}:{path} (ref={ref or 'default'})")
     
+    last_error = None
+
     # Strategy 1: Contents API with base64 decoding
     try:
         # Detect if ref is a commit SHA (40-character hex string) vs branch name
@@ -137,9 +140,19 @@ def fetch_file_content(repo, path, ref=None):
     
     except Exception as e:
         debug_log(f"Contents API failed for {repo}:{path}: {e}")
+        last_error = e
     
     # All strategies failed
-    raise RuntimeError(f"Failed to fetch content from {repo}:{path} using all available strategies")
+    raise RuntimeError(f"Failed to fetch content from {repo}:{path} using all available strategies") from last_error
+
+
+def is_not_found(exc):
+    """True when exc, or an error it was raised from, is an HTTP 404 response."""
+    while exc is not None:
+        if isinstance(exc, requests.HTTPError) and getattr(exc.response, "status_code", None) == 404:
+            return True
+        exc = exc.__cause__
+    return False
 
 def fetch_file_json(repo, path, ref=None):
     """

@@ -3,20 +3,41 @@
 Deduplication utilities for the job tracker.
 Handles URL normalization, dedup key generation, and data processing.
 """
-from urllib.parse import urlparse
+from urllib.parse import parse_qsl, urlencode, urlsplit
 from datetime import datetime
 
 
+# Query parameters that only track where a click came from. Everything else in a
+# query string is kept, because some boards identify the posting there
+# (careers.withwaymo.com/jobs?gh_jid=8350687).
+_TRACKING_PARAMS = {
+    "ref", "ref_src", "referrer", "source", "src", "gh_src", "lever-source", "lever-origin",
+    "trk", "fbclid", "gclid", "mc_cid", "mc_eid", "_hsenc", "_hsmi",
+}
+
+
 def normalize_url(url):
-    """Normalize URL to scheme+host+path for deduplication"""
+    """
+    The one URL key for dedup and the seen memory (see SPEC.md, DEDUP-1 to DEDUP-3):
+    lowercase scheme and host, path without a trailing slash, and the query minus
+    tracking parameters (utm_* and _TRACKING_PARAMS), sorted. The fragment is
+    dropped. Returns None for a blank or unparseable URL, or one with no scheme,
+    host or path.
+    """
+    url = (url or "").strip()
     if not url:
         return None
     try:
-        parsed = urlparse(url.strip().lower())
-        # Keep scheme, netloc (host), and path; drop query and fragment
-        return f"{parsed.scheme}://{parsed.netloc}{parsed.path}".rstrip('/')
-    except Exception:
-        return url
+        parts = urlsplit(url)
+        query = sorted((k, v) for k, v in parse_qsl(parts.query, keep_blank_values=True)
+                       if not (k.lower().startswith("utm_") or k.lower() in _TRACKING_PARAMS))
+    except ValueError:
+        return None
+    path = parts.path.rstrip("/")
+    if not parts.netloc and not path:
+        return None
+    key = f"{parts.scheme.lower()}://{parts.netloc.lower()}{path}"
+    return f"{key}?{urlencode(query)}" if query else key
 
 
 def get_primary_url(item):
@@ -64,3 +85,7 @@ def to_epoch(v):
             return int(datetime.fromisoformat(str(v)).timestamp())
         except Exception:
             return -1
+
+
+def in_window(item, cutoff, date_field, date_fallback):
+    return to_epoch(item.get(date_field, item.get(date_fallback))) >= cutoff

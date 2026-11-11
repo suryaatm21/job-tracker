@@ -21,8 +21,10 @@ import time
 from datetime import datetime, timezone, timedelta
 
 # Utility imports
-from github_helper import debug_log
-from state_utils import load_seen, save_seen, should_alert_item, get_cache_key, format_epoch_for_log, should_include_item
+from github_helper import debug_log, is_not_found
+from state_utils import (load_seen, save_seen, should_alert_item, get_cache_key, format_epoch_for_log,
+                         should_include_item, seen_needs_rebuild, rebuild_seen,
+                         repo_rebuilt, mark_repo_rebuilt)
 from format_utils import format_location, log_location_resolution, format_job_line
 from telegram_utils import batch_send_message, is_dry_run
 from repo_utils import fetch_listings
@@ -69,11 +71,13 @@ STATE_DIR.mkdir(exist_ok=True, parents=True)
 
 
 def get_listings(repo):
-    """Fetch listings from the repo's default branch; [] on failure so one bad repo can't sink the digest"""
+    """Fetch listings from the repo's default branch; a missing listings file (404) is an empty repo, any other error raises"""
     try:
         return fetch_listings(repo, LISTINGS_PATH)
     except Exception as e:
-        debug_log(f"[LISTINGS] {repo} → error: {e}")
+        if not is_not_found(e):
+            raise
+        debug_log(f"[LISTINGS] {repo} → listings file not found (404); counting it as an empty repo")
         return []
 
 
@@ -215,6 +219,10 @@ def main():
     debug_log(f"[WINDOW] Time cutoff: {cutoff_time.isoformat()} ({cutoff_epoch})")
     
     all_items = []
+    rebuild_items = []
+    failed_repos = []
+    rebuilding = seen_needs_rebuild(seen, str(seen_cache_path))
+    rebuilt_repos = []
     
     # Process each repository
     for repo in TARGET_REPOS:
@@ -225,6 +233,9 @@ def main():
             listings = get_listings(repo)
             if not listings:
                 debug_log(f"[REPO] {repo} → No listings found")
+                if rebuilding and not repo_rebuilt(STATE_DIR, repo):
+                    # Fetched fine and holds nothing to translate: its rebuild is complete
+                    rebuilt_repos.append(repo)
                 continue
             
             debug_log(f"[REPO] {repo} → {len(listings)} total items")
@@ -250,13 +261,31 @@ def main():
                     repo_items.append(item_copy)
             
             debug_log(f"[REPO] {repo} → {len(repo_items)} items after filtering")
-            all_items.extend(repo_items)
+            if rebuilding and not repo_rebuilt(STATE_DIR, repo):
+                rebuild_items.extend(repo_items)
+                rebuilt_repos.append(repo)
+            else:
+                all_items.extend(repo_items)
             
         except Exception as e:
             debug_log(f"[REPO] {repo} → Error: {e}")
+            failed_repos.append(repo)
             continue
     
     debug_log(f"[AGGREGATE] Total items from all repos: {len(all_items)}")
+
+    if rebuilt_repos:
+        added = rebuild_seen(seen, rebuild_items, now_epoch)
+        debug_log(f"[REBUILD] Seen cache holds older keys: marked {added} keys from "
+                  f"{len(rebuild_items)} in-window items of {rebuilt_repos} as seen; sending nothing for them")
+        saved = save_seen(seen, SEEN_TTL_DAYS, str(seen_cache_path), dry_run=DRY_RUN, mark_version=not failed_repos)
+        if saved:
+            for repo in rebuilt_repos:
+                mark_repo_rebuilt(STATE_DIR, repo)
+        elif not DRY_RUN:
+            debug_log(f"[REBUILD] Seen cache save failed; {rebuilt_repos} stay in rebuild mode")
+    if rebuilding and failed_repos:
+        debug_log(f"[REBUILD] Could not fetch {failed_repos}; they stay silent and retry next run")
     
     # Deduplication by URL/ID
     seen_keys = set()
@@ -289,7 +318,7 @@ def main():
     if not final_items:
         debug_log("[INFO] No items to send in digest")
         # Still save seen cache to prune stale entries on quiet runs
-        save_seen(seen, SEEN_TTL_DAYS, str(seen_cache_path), dry_run=DRY_RUN)
+        save_seen(seen, SEEN_TTL_DAYS, str(seen_cache_path), dry_run=DRY_RUN, mark_version=not (rebuilding and failed_repos))
         return True  # Success case - no items to send
     
     # Format items for display
@@ -328,7 +357,7 @@ def main():
                 seen[cache_key] = now_epoch
         
         # Save updated seen cache
-        save_seen(seen, SEEN_TTL_DAYS, str(seen_cache_path), dry_run=DRY_RUN)
+        save_seen(seen, SEEN_TTL_DAYS, str(seen_cache_path), dry_run=DRY_RUN, mark_version=not (rebuilding and failed_repos))
         debug_log(f"[CACHE] Updated seen cache with {len(final_items)} new items")
         debug_log(f"[SUCCESS] Digest sent with {len(final_items)} items")
         return True

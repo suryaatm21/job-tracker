@@ -393,15 +393,15 @@ class DedupTest(unittest.TestCase):
             self.job("Waymo", "Software Engineer", "https://careers.withwaymo.com/jobs?gh_jid=8350687", ["SF Bay Area"]),
             self.job("Waymo", "Hardware Engineer", "https://careers.withwaymo.com/jobs?gh_jid=8350832", ["SF Bay Area"])])
         self.assertEqual(len(kept), 2)
-        self.assertNotEqual(digest.canonical_url_key("https://careers.withwaymo.com/jobs?gh_jid=8350687"),
-                            digest.canonical_url_key("https://careers.withwaymo.com/jobs?gh_jid=8350832"))
+        self.assertNotEqual(digest.normalize_url("https://careers.withwaymo.com/jobs?gh_jid=8350687"),
+                            digest.normalize_url("https://careers.withwaymo.com/jobs?gh_jid=8350832"))
 
     def test_only_tracking_parameters_are_ignored(self):
         same = ["https://jobs.test/a/1", "https://JOBS.test/a/1/?utm_source=x&utm_medium=y",
                 "https://jobs.test/a/1?ref=board&source=gh#apply", "https://jobs.test/a/1?gh_src=abc&src=feed"]
-        self.assertEqual(len({digest.canonical_url_key(u) for u in same}), 1)
-        self.assertEqual(digest.canonical_url_key("https://b.test/x?b=2&a=1"),
-                         digest.canonical_url_key("https://b.test/x?a=1&b=2&utm_campaign=z"))
+        self.assertEqual(len({digest.normalize_url(u) for u in same}), 1)
+        self.assertEqual(digest.normalize_url("https://b.test/x?b=2&a=1"),
+                         digest.normalize_url("https://b.test/x?a=1&b=2&utm_campaign=z"))
         kept, funnel = self.run_dedup([
             self.job("Acme", "SWE", same[0], ["NYC"]), self.job("Other", "Other", same[2], ["Miami"])])
         self.assertEqual(len(kept), 1)
