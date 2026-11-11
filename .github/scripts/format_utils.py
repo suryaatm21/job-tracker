@@ -3,6 +3,20 @@
 Formatting utilities for job listing display.
 Includes location formatting logic for different notification modes.
 """
+import json
+import os
+from functools import lru_cache
+
+from opportunity_filters import LocationMatcher, split_location
+
+_CONFIG = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "private_channel", "config.json")
+
+
+@lru_cache(maxsize=1)
+def _matcher():
+    with open(_CONFIG, encoding="utf-8") as f:
+        return LocationMatcher(json.load(f).get("location", {}))
+
 
 def format_location(locations, mode="digest"):
     """
@@ -40,26 +54,12 @@ def format_location(locations, mode="digest"):
         return "Multi-location"
     
     elif mode == "dm":
-        # Check for CA/California first
-        for loc in valid_locations:
-            loc_lower = loc.lower()
-            if "ca" in loc_lower or "california" in loc_lower:
-                return "California"
-        
-        # Check for New York (avoid substring false-positives like 'Albany')
-        import re
-        for loc in valid_locations:
-            loc_lower = loc.lower()
-            if ("new york city" in loc_lower or "new york" in loc_lower or "nyc" in loc_lower or
-                re.search(r"(^|[\s,(/-])ny(\b|[)\s,-])", loc_lower)):
-                return "New York"
-        
-        # Check for NJ/New Jersey
-        for loc in valid_locations:
-            loc_lower = loc.lower()
-            if "nj" in loc_lower or "new jersey" in loc_lower:
-                return "New Jersey"
-        
+        found = {label for loc in valid_locations for seg in split_location(loc)
+                 for label in _matcher().states(seg)}
+        for label in ("California", "New York", "New Jersey"):
+            if label in found:
+                return label
+
         # Default for multi-location in DM mode
         return "Multi-location"
     

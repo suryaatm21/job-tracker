@@ -29,7 +29,7 @@ from state_utils import (
     parse_epoch, get_primary_url
 )
 from format_utils import format_location, log_location_resolution, format_job_line
-from telegram_utils import send_message, batch_send_message, is_dry_run
+from telegram_utils import send_message, batch_send_message, is_dry_run, tg_len
 from repo_utils import resolve_listings_source, get_repo_entries
 from dedup_utils import get_dedup_key, get_unified_season
 from job_filtering import should_process_repo_item
@@ -86,7 +86,7 @@ def send_telegram(text):
         return False
     
     # If message is short enough, send as single message
-    if len(text) <= 4000:
+    if tg_len(text) <= 4000:
         success, status, body = send_message(tok, chat, text)
         debug_log(f"[TELEGRAM] STATUS={status} BODY={body[:200] if body else 'None'}")
         

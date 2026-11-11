@@ -9,6 +9,7 @@ and providing clear continuation headers.
 import atexit
 import json
 import os
+import re
 import time
 from collections import Counter
 from datetime import datetime, timezone
@@ -180,34 +181,81 @@ def send_message(token: str, chat_id: str, text: str, parse_mode: Optional[str] 
     log_sent(text, ok, message_id=message_id, error=error, chat_label=chat_label, secrets=secrets)
     return ok, status, body
 
+TELEGRAM_LIMIT = 4096  # sendMessage text limit, counted in UTF-16 code units
+CONT_PREFIX = "(cont.)\n\n"
+
+
+def tg_len(text: str) -> int:
+    """Length as Telegram counts it: UTF-16 code units, so an emoji outside the BMP counts 2."""
+    return len(text.encode("utf-16-le", "surrogatepass")) // 2
+
+
+_HTML_TOKEN = re.compile(r"<(/?)([A-Za-z][A-Za-z0-9-]*)[^>]*>|&#?\w+;|.", re.S)
+
+
+def _truncate_line(line: str, max_units: int) -> str:
+    """
+    Shorten a line to at most max_units UTF-16 units, ending in an ellipsis.
+    Cuts fall outside HTML tags and entities, and tags still open at the cut are closed.
+    """
+    if tg_len(line) <= max_units:
+        return line
+    print(f"ERROR: Telegram line is {tg_len(line)} units; truncating to {max_units}")
+    out, used, open_tags = [], 0, []
+    for m in _HTML_TOKEN.finditer(line):
+        token, closing, name = m.group(0), m.group(1), m.group(2)
+        stack = open_tags
+        if name:
+            stack = open_tags[:-1] if closing and open_tags else open_tags + ([] if closing else [name])
+        reserve = 1 + sum(tg_len(f"</{t}>") for t in stack)
+        if used + tg_len(token) + reserve > max_units:
+            break
+        out.append(token)
+        used += tg_len(token)
+        open_tags = stack
+    return "".join(out) + "\u2026" + "".join(f"</{t}>" for t in reversed(open_tags))
+
+
 def safe_join_lines(header: str, lines: List[str], max_chars: int = 3900) -> List[str]:
     """
     Join lines into batches that fit within character limit, preserving whole lines.
-    
+
+    Lengths are counted in UTF-16 units, as Telegram counts them. A line that
+    cannot fit in one Telegram message even on its own is truncated with an
+    ellipsis; every other line stays whole, even one longer than max_chars.
+
     Args:
         header: Header text for first batch
         lines: List of content lines to batch
-        max_chars: Maximum characters per batch
-    
+        max_chars: Maximum characters per batch (capped at TELEGRAM_LIMIT)
+
     Returns:
         list[str]: List of message batches ready to send
     """
+    max_chars = min(max_chars, TELEGRAM_LIMIT)
     if not lines:
+        header = _truncate_line(header, TELEGRAM_LIMIT)
         return [header] if header else []
-    
+    if tg_len(header) + 2 + tg_len(lines[0]) > TELEGRAM_LIMIT:
+        header = _truncate_line(header, max(max_chars // 2, TELEGRAM_LIMIT - 2 - tg_len(lines[0])))
+
+    first_room = TELEGRAM_LIMIT - tg_len(header) - 2
+    room = TELEGRAM_LIMIT - tg_len(CONT_PREFIX)
+    fitted = [_truncate_line(line, max(first_room if i == 0 else room, 2)) for i, line in enumerate(lines)]
+
     batches = []
     current_batch = []
-    current_length = len(header)
-    
-    for line in lines:
-        line_length = len(line) + 1  # +1 for newline
-        
+    current_length = tg_len(header) + 1  # header + "\n\n", less the first line's newline
+
+    for line in fitted:
+        line_length = tg_len(line) + 1  # +1 for newline
+
         # If adding this line would exceed limit, start new batch
         if current_batch and current_length + line_length > max_chars:
             # Finish current batch
             if batches:
                 # Continuation batch
-                batch_text = "(cont.)\n\n" + "\n".join(current_batch)
+                batch_text = CONT_PREFIX + "\n".join(current_batch)
             else:
                 # First batch with header
                 batch_text = header + "\n\n" + "\n".join(current_batch)
@@ -216,7 +264,7 @@ def safe_join_lines(header: str, lines: List[str], max_chars: int = 3900) -> Lis
             
             # Start new batch
             current_batch = [line]
-            current_length = 10 + line_length  # 10 for "(cont.)\n\n"
+            current_length = tg_len(CONT_PREFIX) + line_length
         else:
             # Add line to current batch
             current_batch.append(line)
@@ -226,7 +274,7 @@ def safe_join_lines(header: str, lines: List[str], max_chars: int = 3900) -> Lis
     if current_batch:
         if batches:
             # Final continuation batch
-            batch_text = "(cont.)\n\n" + "\n".join(current_batch)
+            batch_text = CONT_PREFIX + "\n".join(current_batch)
         else:
             # Single batch with header
             batch_text = header + "\n\n" + "\n".join(current_batch)
@@ -305,7 +353,7 @@ def send_telegram_with_batching(text: str, parse_mode: Optional[str] = None) -> 
         return False
     
     # If message is short enough, send as single message
-    if len(text) <= 4000:
+    if tg_len(text) <= 4000:
         success, status, body = send_message(token, chat_id, text, parse_mode)
         if not success:
             print(f"Telegram send failed: {status} - {body}")

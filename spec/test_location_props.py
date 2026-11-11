@@ -1,5 +1,4 @@
 """LOC rules: the location label on a DM or digest line (format_utils.format_location)."""
-import pytest
 from hypothesis import example, given, settings, strategies as st
 
 import format_utils
@@ -23,7 +22,6 @@ def with_one_of(places, others, at):
     return st.tuples(st.sampled_from(places), others, at).map(lambda t: t[1][:t[2]] + [t[0]] + t[1][t[2]:])
 
 
-@pytest.mark.xfail(strict=True, raises=AssertionError, reason="LOC-1")
 @settings(max_examples=500)
 @given(locs=st.lists(st.sampled_from(ELSEWHERE + NEW_YORK + NEW_JERSEY), min_size=2, max_size=4))
 @example(locs=["Chicago, IL", "Seattle, WA"])
@@ -77,7 +75,6 @@ def test_loc_1_dm_says_new_jersey_only_for_new_jersey(locs):
     assert format_utils.format_location(locs, "dm") != "New Jersey", locs
 
 
-@pytest.mark.xfail(strict=True, raises=AssertionError, reason="LOC-1")
 @settings(max_examples=200)
 @given(locs=with_one_of(NOT_NEW_JERSEY, st.lists(st.sampled_from(PLAIN_ELSEWHERE), min_size=1, max_size=3),
                         st.integers(0, 3)))

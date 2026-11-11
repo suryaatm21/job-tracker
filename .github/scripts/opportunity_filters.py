@@ -106,6 +106,15 @@ def _word_pattern(phrase):
     return re.compile(r"(?<![a-z])" + re.escape(phrase) + r"(?![a-z])")
 
 
+US_STATE_CODES = frozenset(
+    "al ak az ar ca co ct de dc fl ga hi id il in ia ks ky la me md ma mi mn ms mo mt ne nv nh nj nm ny "
+    "nc nd oh ok or pa ri sc sd tn tx ut vt va wa wv wi wy".split())
+_COUNTRY_SEGMENTS = {"us", "usa", "u.s.", "u.s.a.", "united states"}
+# New Jersey has no metro in config.json, so it gets its own whole-word rule.
+_NEW_JERSEY = _word_pattern("nj").pattern + "|" + _word_pattern("new jersey").pattern
+_NEW_JERSEY = re.compile(_NEW_JERSEY)
+
+
 class LocationMatcher:
     """
     Match listing locations against configured metros.
@@ -130,8 +139,12 @@ class LocationMatcher:
         self.filler_tokens = {t.lower() for t in config.get("filler_tokens", [])}
         self.metros = []
         for metro in config.get("metros", []):
+            tokens = {t.lower() for t in metro.get("state_tokens", [])}
+            state = max(tokens, key=len).title() if tokens else None
             self.metros.append({
                 "label": metro["label"],
+                "state": state,
+                "tokens": tokens,
                 "cities": [_word_pattern(c.lower()) for c in metro.get("cities", [])],
                 "qualified": [_word_pattern(c.lower()) for c in metro.get("cities_needing_state", [])],
                 "bare": [_word_pattern(c.lower()) for c in metro.get("bare_names", [])],
@@ -162,6 +175,28 @@ class LocationMatcher:
         """Every metro label one location segment names, in config order ("SF/NYC" -> both)."""
         text = _norm_location(location)
         return [metro["label"] for metro in self.metros if text and self._metro_matches(metro, text)]
+
+    def states(self, location):
+        """State labels one location is in ("California", "New York", "New Jersey", ...).
+
+        After any trailing country segment ("US", "USA", "United States"), a US
+        state code ending the comma list decides alone, so "New York Mills, MN"
+        is Minnesota. Otherwise a state counts when its code or name (the metros'
+        state_tokens) appears as a whole word, or the location is in one of its metros.
+        """
+        text = _norm_location(location)
+        parts = [p.strip() for p in text.split(",")]
+        while len(parts) > 1 and parts[-1] in _COUNTRY_SEGMENTS:
+            parts.pop()
+        code = parts[-1] if len(parts) > 1 and parts[-1] in US_STATE_CODES else None
+        if code:
+            found = [m["state"] for m in self.metros if m["state"] and code in m["tokens"]]
+            found += ["New Jersey"] if code == "nj" else []
+            return list(dict.fromkeys(found))
+        found = [m["state"] for m in self.metros if m["state"] and text and (
+            self._metro_matches(m, text) or any(p.search(text) for p in m["states"]))]
+        found += ["New Jersey"] if _NEW_JERSEY.search(text) else []
+        return list(dict.fromkeys(found))
 
     def match_one(self, location):
         """First metro label for a single location segment, or None."""

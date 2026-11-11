@@ -1,13 +1,13 @@
 diff --git a/.github/scripts/format_utils.py b/.github/scripts/format_utils.py
-index 3d7a077..d79a7dd 100644
+index a0aa66c..d4035d4 100644
 --- a/.github/scripts/format_utils.py
 +++ b/.github/scripts/format_utils.py
-@@ -52,7 +52,7 @@ def format_location(locations, mode="digest"):
-             loc_lower = loc.lower()
-             if ("new york city" in loc_lower or "new york" in loc_lower or "nyc" in loc_lower or
-                 re.search(r"(^|[\s,(/-])ny(\b|[)\s,-])", loc_lower)):
--                return "New York"
-+                pass
-         
-         # Check for NJ/New Jersey
-         for loc in valid_locations:
+@@ -57,7 +57,7 @@ def format_location(locations, mode="digest"):
+         found = {label for loc in valid_locations for seg in split_location(loc)
+                  for label in _matcher().states(seg)}
+         for label in ("California", "New York", "New Jersey"):
+-            if label in found:
++            if label != "New York" and label in found:
+                 return label
+ 
+         # Default for multi-location in DM mode

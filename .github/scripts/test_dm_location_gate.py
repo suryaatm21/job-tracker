@@ -143,5 +143,88 @@ class PublicDigestStaysNationwide(unittest.TestCase):
                 self.assertTrue(send_digest_multi.should_include_listing(item))
 
 
+class DmStateLabelTest(unittest.TestCase):
+    def test_needing_state_city_names_its_state(self):
+        from format_utils import format_location
+        self.assertEqual(format_location(["San Jose", "Seattle, WA"], "dm"), "California")
+
+    def test_new_jersey_without_a_metro(self):
+        from format_utils import format_location
+        self.assertEqual(format_location(["Jersey City, NJ", "Seattle, WA"], "dm"), "New Jersey")
+
+    def test_no_state_is_multi_location(self):
+        from format_utils import format_location
+        self.assertEqual(format_location(["Chicago, IL", "Nanjing, China"], "dm"), "Multi-location")
+
+
+class StateCodeTest(unittest.TestCase):
+    def test_code_after_last_comma_decides(self):
+        from format_utils import format_location
+        self.assertEqual(format_location(["San Diego, CA", "Seattle, WA"], "dm"), "California")
+        self.assertEqual(format_location(["New York Mills, MN, USA", "Seattle, WA"], "dm"), "Multi-location")
+        self.assertEqual(format_location(["San Jose, CA, US", "Seattle, WA"], "dm"), "California")
+        self.assertEqual(format_location(["New York, NY", "Seattle, WA"], "dm"), "New York")
+        self.assertEqual(format_location(["New York, United States", "Seattle, WA"], "dm"), "New York")
+
+
+class WatchRepoEmojiTest(unittest.TestCase):
+    def test_emoji_heavy_alert_is_batched_not_sent_whole(self):
+        import watch_repo, telegram_utils
+        text = "\U0001F600" * 2100
+        with mock.patch.dict(os.environ, {"TELEGRAM_BOT_TOKEN": "t", "TELEGRAM_CHAT_ID": "c"}), \
+                mock.patch.object(watch_repo, "send_message") as single, \
+                mock.patch.object(watch_repo, "batch_send_message", return_value=(True, [])) as batch:
+            watch_repo.send_telegram(text)
+        single.assert_not_called()
+        batch.assert_called_once()
+
+
+class OversizedLineTest(unittest.TestCase):
+    def test_html_line_is_truncated_outside_tags_with_tags_closed(self):
+        import telegram_utils
+        line = "• <b>Acme</b> — " + "<i>" + "word " * 1200 + "</i>"
+        with contextlib.redirect_stdout(io.StringIO()) as out:
+            batches = telegram_utils.safe_join_lines("Header", ["first", line, "last"])
+        self.assertIn("ERROR", out.getvalue())
+        body = "\n".join(batches).split("\n")
+        self.assertTrue(all(telegram_utils.tg_len(b) <= telegram_utils.TELEGRAM_LIMIT for b in batches))
+        cut = next(l for l in body if l.startswith("• <b>Acme</b>"))
+        self.assertTrue(cut.endswith("\u2026</i>"))
+        self.assertEqual(cut.count("<i>"), cut.count("</i>"))
+        self.assertIn("last", body)
+
+    def test_lone_surrogate_does_not_raise(self):
+        import telegram_utils
+        self.assertEqual(telegram_utils.tg_len("a\ud83db"), 3)
+
+
+class OversizedHeaderTest(unittest.TestCase):
+    def test_header_is_truncated_and_every_batch_fits(self):
+        import telegram_utils
+        header = "H" * 5000
+        with contextlib.redirect_stdout(io.StringIO()) as out:
+            batches = telegram_utils.safe_join_lines(header, ["a line", "b" * 6000])
+        self.assertIn("ERROR", out.getvalue())
+        self.assertTrue(batches[0].startswith("H" * 100))
+        self.assertTrue(all(telegram_utils.tg_len(b) <= telegram_utils.TELEGRAM_LIMIT for b in batches))
+
+    def test_header_kept_whole_when_first_line_fits(self):
+        import telegram_utils
+        header = "H" * 3000
+        batches = telegram_utils.safe_join_lines(header, ["a" * 1000, "b" * 1000])
+        self.assertTrue(batches[0].startswith(header + "\n\n"))
+        self.assertTrue(all(telegram_utils.tg_len(b) <= telegram_utils.TELEGRAM_LIMIT for b in batches))
+
+    def test_header_cut_only_as_far_as_needed(self):
+        import telegram_utils
+        batches = telegram_utils.safe_join_lines("H" * 4090, ["a" * 10, "b"])
+        self.assertGreater(telegram_utils.tg_len(batches[0]), 4000)
+        self.assertLessEqual(telegram_utils.tg_len(batches[0]), telegram_utils.TELEGRAM_LIMIT)
+
+    def test_lone_text_that_fits_is_not_cut(self):
+        import telegram_utils
+        self.assertEqual(telegram_utils.safe_join_lines("x" * 4050, []), ["x" * 4050])
+
+
 if __name__ == "__main__":
     unittest.main()
