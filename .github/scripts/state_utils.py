@@ -6,6 +6,7 @@ Provides utilities to track when job listings were last alerted and allow
 re-opened roles (updated date_updated) to alert again immediately.
 """
 import json
+import os
 import pathlib
 import time
 from datetime import datetime, timezone
@@ -118,7 +119,8 @@ def seen_needs_rebuild(seen, path=".state/seen.json"):
     """
     True when seen holds entries saved under older keys: the memory is not empty
     and its key-version marker is missing or older than SEEN_KEY_VERSION. Empty
-    memory needs no rebuild, because nothing in it could be posted twice.
+    memory needs no rebuild: a memory that failed to load is replaced by a whole
+    file written atomically, so it is empty only when nothing was ever saved.
     """
     if not seen:
         return False
@@ -146,7 +148,15 @@ def rebuild_seen(seen, items, now_epoch):
     return added
 
 
-def save_seen(seen, ttl_days, path=".state/seen.json", max_entries=200000, dry_run=False):
+def write_atomic(path, text):
+    """Write text so a killed run leaves either the old file or the new one, never a truncated one."""
+    path = pathlib.Path(path)
+    tmp = path.with_name(path.name + ".tmp")
+    tmp.write_text(text, encoding="utf-8")
+    os.replace(tmp, path)
+
+
+def save_seen(seen, ttl_days, path=".state/seen.json", max_entries=200000, dry_run=False, mark_version=True):
     """
     Save seen cache to JSON file with TTL-based pruning, and mark it as holding
     SEEN_KEY_VERSION keys.
@@ -181,10 +191,10 @@ def save_seen(seen, ttl_days, path=".state/seen.json", max_entries=200000, dry_r
             print(f"Warning: Seen cache capped at {max_entries} entries (was {len(seen)})")
         
         # Save to file
-        with open(seen_path, 'w', encoding='utf-8') as f:
-            json.dump(pruned_seen, f, indent=2)
+        write_atomic(seen_path, json.dumps(pruned_seen, indent=2))
         # Written after the memory, so a failed save leaves the old version in place
-        key_version_path(seen_path).write_text(f"{SEEN_KEY_VERSION}\n", encoding="utf-8")
+        if mark_version:
+            write_atomic(key_version_path(seen_path), f"{SEEN_KEY_VERSION}\n")
         
         pruned_count = len(seen) - len(pruned_seen)
         if pruned_count > 0:

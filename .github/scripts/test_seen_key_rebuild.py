@@ -199,12 +199,54 @@ class WatcherSilentFirstRun(StateDirTestCase):
 
     def test_rebuild_with_a_failed_fetch_saves_nothing(self):
         self.write_legacy_memory()
-        before = self.seen_path.read_text()
+        before = self.memory()
         with mock.patch.object(watch_repo, "window_listings", side_effect=RuntimeError("boom")):
             send, _ = self.run_watcher([])
         send.assert_not_called()
-        self.assertEqual(self.seen_path.read_text(), before)
+        self.assertEqual(self.memory(), before)
         self.assertFalse(self.marker.exists())
+
+    def test_missing_listings_file_counts_as_an_empty_repo(self):
+        self.write_legacy_memory()
+        with mock.patch.object(watch_repo, "fetch_listings", side_effect=RuntimeError("404 Not Found")):
+            send, _ = self.run_watcher([])
+        send.assert_not_called()
+        self.assertEqual(self.marker.read_text().strip(), str(state_utils.SEEN_KEY_VERSION))
+
+    def test_failed_repo_stays_silent_while_the_other_repo_proceeds(self):
+        other = "other/Repo"
+        self.write_legacy_memory()
+
+        def window(repo, now_epoch):
+            if repo == other:
+                raise RuntimeError("boom")
+            return [SENT, SIBLING]
+
+        def run():
+            send = mock.Mock(return_value=True)
+            process = mock.Mock(return_value=[self.entry(NEW)])
+            with mock.patch.object(watch_repo, "STATE_DIR", self.state), \
+                    mock.patch.object(watch_repo, "DRY_RUN", False), \
+                    mock.patch.object(watch_repo, "TARGET_REPOS", [REPO, other]), \
+                    mock.patch.object(watch_repo, "window_listings", side_effect=window), \
+                    mock.patch.object(watch_repo, "resolve_listings_source", return_value=("dev", "listings.json")), \
+                    mock.patch.object(watch_repo, "get_repo_entries", return_value=[{"sha": self.HEAD}]), \
+                    mock.patch.object(watch_repo, "process_repo_entries", process), \
+                    mock.patch.object(watch_repo, "send_telegram", send), \
+                    mock.patch.dict(os.environ, {"DM_METROS": '["SF Bay Area", "NYC"]'}):
+                watch_repo.main()
+            return process
+
+        first = run()
+        first.assert_not_called()
+        self.assertFalse(self.marker.exists())
+        second = run()
+        self.assertEqual([c.args[0] for c in second.call_args_list], [REPO])
+
+    def test_save_leaves_no_temp_file(self):
+        state_utils.save_seen({"k": int(time.time())}, 14, str(self.seen_path))
+        self.assertEqual(sorted(p.name for p in self.state.iterdir()),
+                         sorted([self.seen_path.name, self.marker.name]))
 
 
 if __name__ == "__main__":
