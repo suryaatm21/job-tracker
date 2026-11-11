@@ -34,9 +34,9 @@ def normalize_url(url):
     except ValueError:
         return None
     path = parts.path.rstrip("/")
-    key = f"{parts.scheme.lower()}://{parts.netloc.lower()}{path}"
-    if key == "://":
+    if not parts.netloc and not path:
         return None
+    key = f"{parts.scheme.lower()}://{parts.netloc.lower()}{path}"
     return f"{key}?{urlencode(query)}" if query else key
 
 

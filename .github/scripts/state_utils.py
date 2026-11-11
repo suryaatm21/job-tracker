@@ -119,8 +119,9 @@ def seen_needs_rebuild(seen, path=".state/seen.json"):
     """
     True when seen holds entries saved under older keys: the memory is not empty
     and its key-version marker is missing or older than SEEN_KEY_VERSION. Empty
-    memory needs no rebuild: a memory that failed to load is replaced by a whole
-    file written atomically, so it is empty only when nothing was ever saved.
+    memory needs no rebuild because there are no old keys to translate. A seen.json
+    that fails to load also starts empty and can repost the window; atomic saves
+    only prevent new truncation.
     """
     if not seen:
         return False
@@ -128,6 +129,22 @@ def seen_needs_rebuild(seen, path=".state/seen.json"):
         return int(key_version_path(path).read_text(encoding="utf-8").strip()) < SEEN_KEY_VERSION
     except (OSError, ValueError):
         return True
+
+
+def repo_rebuilt(state_dir, repo):
+    """True when this repo's listings were already recorded under SEEN_KEY_VERSION keys."""
+    try:
+        return int(rebuilt_marker_path(state_dir, repo).read_text().strip()) >= SEEN_KEY_VERSION
+    except (OSError, ValueError):
+        return False
+
+
+def rebuilt_marker_path(state_dir, repo):
+    return pathlib.Path(state_dir) / f"rebuilt_{repo.replace('/', '_')}.txt"
+
+
+def mark_repo_rebuilt(state_dir, repo):
+    write_atomic(rebuilt_marker_path(state_dir, repo), f"{SEEN_KEY_VERSION}\n")
 
 
 def rebuild_seen(seen, items, now_epoch):

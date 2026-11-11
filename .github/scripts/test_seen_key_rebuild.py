@@ -5,6 +5,7 @@ silently, sending nothing, so no listing already sent under an old key posts twi
 
 Run: python -m unittest discover -s .github/scripts -p 'test_seen_key_rebuild.py'
 """
+import contextlib
 import json
 import os
 import pathlib
@@ -14,6 +15,8 @@ import time
 import unittest
 from unittest import mock
 
+import requests
+
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 # watch_repo and send_digest_multi create STATE_DIR at import time; keep it out of the repo
@@ -22,6 +25,8 @@ os.environ.setdefault("STATE_DIR", tempfile.mkdtemp(prefix="seen-key-rebuild-"))
 import send_digest_multi  # noqa: E402
 import state_utils  # noqa: E402
 import watch_repo  # noqa: E402
+import github_helper  # noqa: E402
+import repo_utils  # noqa: E402
 
 REPO = "vanshb03/Summer2027-Internships"
 PAGE = "https://boards.greenhouse.io/acme/jobs"
@@ -93,13 +98,31 @@ class KeyVersionMarker(StateDirTestCase):
                                 state_utils.get_cache_key(SIBLING): 500})
 
 
+def http_error(status):
+    response = mock.Mock(status_code=status)
+    return requests.HTTPError(f"{status} Error", response=response)
+
+
+def failing_fetch(status):
+    """Drive a real HTTP error through repo_utils.fetch_listings and github_helper.fetch_file_content."""
+    stack = mock.patch.object(github_helper, "gh_get", side_effect=http_error(status))
+    resolve = mock.patch.object(repo_utils, "resolve_listings_source", return_value=("dev", "listings.json"))
+    return stack, resolve
+
+
 class DigestSilentFirstRun(StateDirTestCase):
-    def run_digest(self, listings, dry_run=False):
+    def run_digest(self, listings, dry_run=False, status=None):
         send = mock.Mock(return_value=(True, []))
+        patches = failing_fetch(status) if status else (mock.patch.object(send_digest_multi, "get_listings", return_value=listings),)
+        with contextlib.ExitStack() as stack:
+            for patch in patches:
+                stack.enter_context(patch)
+            return self._run_digest(send, dry_run)
+
+    def _run_digest(self, send, dry_run):
         with mock.patch.object(send_digest_multi, "STATE_DIR", self.state), \
                 mock.patch.object(send_digest_multi, "DRY_RUN", dry_run), \
                 mock.patch.object(send_digest_multi, "TARGET_REPOS", [REPO]), \
-                mock.patch.object(send_digest_multi, "get_listings", **({"side_effect": listings} if isinstance(listings, Exception) else {"return_value": listings})), \
                 mock.patch.object(send_digest_multi, "batch_send_message", send), \
                 mock.patch.dict(os.environ, {"TELEGRAM_BOT_TOKEN": "t", "TELEGRAM_CHAT_ID": "c"}):
             self.assertTrue(send_digest_multi.main())
@@ -132,15 +155,21 @@ class DigestSilentFirstRun(StateDirTestCase):
 
     def test_rebuild_with_a_failed_repo_saves_nothing(self):
         self.write_legacy_memory()
-        before = self.seen_path.read_text()
-        send = self.run_digest(RuntimeError("fetch failed"))
+        before = self.memory()
+        send = self.run_digest(None, status=500)
         send.assert_not_called()
-        self.assertEqual(self.seen_path.read_text(), before)
+        self.assertEqual(self.memory(), before)
         self.assertFalse(self.marker.exists())
 
     def test_rebuild_with_an_empty_repo_completes(self):
         self.write_legacy_memory()
         send = self.run_digest([])
+        send.assert_not_called()
+        self.assertEqual(self.marker.read_text().strip(), str(state_utils.SEEN_KEY_VERSION))
+
+    def test_rebuild_with_a_missing_listings_file_completes(self):
+        self.write_legacy_memory()
+        send = self.run_digest(None, status=404)
         send.assert_not_called()
         self.assertEqual(self.marker.read_text().strip(), str(state_utils.SEEN_KEY_VERSION))
 
@@ -162,7 +191,7 @@ class WatcherSilentFirstRun(StateDirTestCase):
         with mock.patch.object(watch_repo, "STATE_DIR", self.state), \
                 mock.patch.object(watch_repo, "DRY_RUN", False), \
                 mock.patch.object(watch_repo, "TARGET_REPOS", [REPO]), \
-                mock.patch.object(watch_repo, "fetch_listings", return_value=listings), \
+                mock.patch.object(watch_repo, "fetch_listings", **({"new": repo_utils.fetch_listings} if listings is None else {"return_value": listings})), \
                 mock.patch.object(watch_repo, "resolve_listings_source", return_value=("dev", "listings.json")), \
                 mock.patch.object(watch_repo, "get_repo_entries", return_value=[{"sha": self.HEAD}]), \
                 mock.patch.object(watch_repo, "process_repo_entries", process), \
@@ -208,8 +237,9 @@ class WatcherSilentFirstRun(StateDirTestCase):
 
     def test_missing_listings_file_counts_as_an_empty_repo(self):
         self.write_legacy_memory()
-        with mock.patch.object(watch_repo, "fetch_listings", side_effect=RuntimeError("404 Not Found")):
-            send, _ = self.run_watcher([])
+        stack, resolve = failing_fetch(404)
+        with stack, resolve:
+            send, _ = self.run_watcher(None)
         send.assert_not_called()
         self.assertEqual(self.marker.read_text().strip(), str(state_utils.SEEN_KEY_VERSION))
 

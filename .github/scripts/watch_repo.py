@@ -22,10 +22,10 @@ from collections import Counter
 from datetime import datetime
 
 # Import all utility modules
-from github_helper import debug_log
+from github_helper import debug_log, is_not_found
 from state_utils import (
     load_seen, save_seen, should_alert_item, 
-    get_cache_key, format_epoch_for_log, write_atomic, SEEN_KEY_VERSION, should_include_item,
+    get_cache_key, format_epoch_for_log, repo_rebuilt, mark_repo_rebuilt, should_include_item,
     parse_epoch, get_primary_url, seen_needs_rebuild, rebuild_seen
 )
 from format_utils import format_location, log_location_resolution, format_job_line
@@ -161,7 +161,7 @@ def window_listings(repo, now_epoch):
     try:
         listings = fetch_listings(repo, LISTINGS_PATH)
     except Exception as e:
-        if "404" not in str(e):
+        if not is_not_found(e):
             raise
         debug_log(f"[REBUILD] {repo} listings file not found (404); counting it as an empty repo")
         return []
@@ -194,14 +194,6 @@ def main():
     rebuilding = seen_needs_rebuild(seen, str(seen_cache_path))
     rebuild_failed = []
     rebuilt_repos = []
-    rebuilt_marker = lambda repo: STATE_DIR / f"rebuilt_{repo.replace('/', '_')}.txt"
-
-    def repo_rebuilt(repo):
-        try:
-            return int(rebuilt_marker(repo).read_text().strip()) >= SEEN_KEY_VERSION
-        except (OSError, ValueError):
-            return False
-
     if rebuilding:
         debug_log("[REBUILD] Seen cache holds older keys: silent run, nothing will be sent")
     
@@ -235,7 +227,7 @@ def main():
         debug_log(f"[STATE] {repo} last_seen_SHA: {last_seen[:8] if last_seen else 'None'}")
         
         try:
-            if rebuilding and not repo_rebuilt(repo):
+            if rebuilding and not repo_rebuilt(STATE_DIR, repo):
                 try:
                     in_window = window_listings(repo, now_epoch)
                     added = rebuild_seen(seen, in_window, now_epoch)
@@ -277,7 +269,7 @@ def main():
                   mark_version=not rebuild_failed)
         if not DRY_RUN:
             for repo in rebuilt_repos:
-                write_atomic(rebuilt_marker(repo), f"{SEEN_KEY_VERSION}\n")
+                mark_repo_rebuilt(STATE_DIR, repo)
     if rebuild_failed:
         debug_log(f"[REBUILD] Could not fetch {rebuild_failed}; they stay silent and retry next run")
 
