@@ -15,7 +15,7 @@ This implementation adds a time-boxed "seen with TTL" memory system to the job-a
 - **File**: `.state/seen.json` - persistent TTL cache across workflow runs
 - **Format**: `{cache_key: last_alert_timestamp}` mapping
 - **Auto-cleanup**: Expired entries are removed during load/save operations
-- **Key version**: `seen_key_version`, next to `seen.json`, records which cache-key version the memory holds (`state_utils.SEEN_KEY_VERSION`). When the scheduled digest or DM watcher finds a non-empty memory with an older or missing version, that run marks every listing in its window as seen, sends nothing, and writes the new version. Bump the version whenever `get_cache_key` changes. The private digest keeps its own keys and never rebuilds.
+- **Key version**: `seen_key_version`, next to `seen.json`, records which cache-key version the memory holds (`state_utils.SEEN_KEY_VERSION`). When the scheduled digest or DM watcher finds a non-empty memory with an older or missing version, that run marks every listing in its window as seen, sends nothing for those repos, and writes the new version. Each repo is rebuilt on its own (marker `rebuilt_<owner>_<repo>.txt` in the state directory): a missing listings file (HTTP 404) counts as an empty repo, while any other fetch error keeps only that repo silent and retries it next run, with the version written once every repo is done. Bump the version whenever `get_cache_key` changes. The private digest keeps its own keys and never rebuilds.
 
 ### 3. Cache Key Strategy
 ```python
