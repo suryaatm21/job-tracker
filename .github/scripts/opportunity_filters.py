@@ -1,11 +1,13 @@
 #!/usr/bin/env python3
 """
-Filters for the private opportunity digest (send_private_digest.py).
+Filters for the private opportunity digest (send_private_digest.py). The DM
+watcher (watch_repo.py) reuses the location gate, limited to its own metros.
 
 Everything here is deterministic and driven by the JSON files in
 .github/private_channel/:
 - tag_level: intern vs new grad, from title keywords, else the source's default
 - LocationMatcher: metro matching (SF Bay Area, NYC, LA, Austin, Miami) from config.json
+- metro_subset_matcher: the same matcher over only the named metros (the DM gate)
 - parse_pay: posted pay text -> top of range as yearly and hourly USD
 - CompanyTiers: exact-alias company lookup from company_tiers.json
 - is_graduate_only: PhD/MS-only roles (title rules + Simplify's degrees field)
@@ -195,6 +197,23 @@ class LocationMatcher:
         if not segments or item.get("has_hidden_locations") or all(self._is_unknown(seg) for seg in segments):
             return LOCATION_UNKNOWN, []
         return LOCATION_ELSEWHERE, []
+
+
+def metro_subset_matcher(location_config, labels):
+    """
+    LocationMatcher over only the named metros of a config.json "location" section.
+
+    Remote, filler and unknown-location handling stay those of the full section,
+    so a listing outside the named metros classifies as LOCATION_ELSEWHERE.
+    Raises ValueError for an empty list or a label the section does not define,
+    so a typo fails the run instead of dropping every listing.
+    """
+    by_label = {metro["label"]: metro for metro in location_config.get("metros", [])}
+    labels = list(labels or [])
+    unknown = [label for label in labels if label not in by_label]
+    if not labels or unknown:
+        raise ValueError(f"metro labels must be a non-empty subset of {sorted(by_label)}; got {labels}")
+    return LocationMatcher({**location_config, "metros": [by_label[label] for label in labels]})
 
 
 # ---------------------------------------------------------------------------

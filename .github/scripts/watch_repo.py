@@ -12,8 +12,13 @@ This module orchestrates the job watching workflow using modular utilities:
 - telegram_utils: Message sending
 
 Set DRY_RUN=true to print the DM instead of sending it and leave STATE_DIR untouched.
+
+DM_METROS (JSON list, required) names the metros a listing must be in to reach
+the DM, by label from the "location" section of .github/private_channel/config.json.
+The gate is the private digest's LocationMatcher limited to those metros.
 """
 import os, json, pathlib, time
+from collections import Counter
 from datetime import datetime
 
 # Import all utility modules
@@ -29,6 +34,9 @@ from repo_utils import resolve_listings_source, get_repo_entries
 from dedup_utils import get_dedup_key, get_unified_season
 from job_filtering import should_process_repo_item
 from watcher_core import process_repo_entries
+from opportunity_filters import metro_subset_matcher, LOCATION_ELSEWHERE, LOCATION_REMOTE, LOCATION_UNKNOWN
+
+LOCATION_CONFIG_PATH = pathlib.Path(__file__).resolve().parents[1] / "private_channel" / "config.json"
 
 # Multi-repo configuration
 TARGET_REPOS = json.loads(os.environ.get("TARGET_REPOS", '["vanshb03/Summer2027-Internships"]'))
@@ -132,8 +140,26 @@ def migrate_legacy_state():
     except Exception as e:
         debug_log(f"[MIGRATE] Legacy state migration failed: {e}")
 
+def build_location_gate(metros_json):
+    """DM location gate from a DM_METROS JSON list; raises on a missing or invalid value."""
+    if not metros_json:
+        raise ValueError("DM_METROS is not set; the DM watcher will not run without a location gate")
+    location_config = json.loads(LOCATION_CONFIG_PATH.read_text(encoding="utf-8"))["location"]
+    return metro_subset_matcher(location_config, json.loads(metros_json))
+
+
+def log_location_drops(drop_counts):
+    """One line of location-gate drop counts per reason (counts only, no listing text)."""
+    reasons = [f"location:{o}" for o in (LOCATION_ELSEWHERE, LOCATION_REMOTE, LOCATION_UNKNOWN)]
+    reasons += sorted(r for r in drop_counts if r not in reasons)
+    debug_log("[LOCATION] dropped " + " ".join(f"{r}={drop_counts[r]}" for r in reasons))
+
+
 def main():
+    location_gate = build_location_gate(os.getenv("DM_METROS"))
+    location_drops = Counter()
     debug_log(f"[CONFIG] Starting multi-repo watch for: {TARGET_REPOS}")
+    debug_log(f"[CONFIG] DM_METROS={[m['label'] for m in location_gate.metros]}")
     debug_log(f"[CONFIG] Watching paths: {WATCH_PATHS}")
     debug_log(f"[CONFIG] Listings file path hint: {LISTINGS_PATH}")
     debug_log(f"[CONFIG] WINDOW_HOURS={WINDOW_HOURS}, SEEN_TTL_DAYS={SEEN_TTL_DAYS}")
@@ -185,7 +211,8 @@ def main():
             repo_entries = process_repo_entries(
                 repo, listings_path, last_seen, WATCH_PATHS,
                 WINDOW_HOURS, DATE_FIELD, DATE_FALLBACK,
-                seen, ttl_seconds, now_epoch
+                seen, ttl_seconds, now_epoch,
+                location_gate=location_gate, drop_counts=location_drops
             )
             all_entries.extend(repo_entries)
             
@@ -203,6 +230,8 @@ def main():
             debug_log(f"[ERROR] {repo} processing failed: {e}")
             continue
     
+    log_location_drops(location_drops)
+
     if not all_entries:
         debug_log("[RESULT] No new entries found across all repos")
         # Still save seen cache to prune old entries

@@ -11,12 +11,20 @@ from job_filtering import should_process_repo_item
 from dedup_utils import get_dedup_key, get_primary_url, get_unified_season, to_epoch
 from state_utils import should_alert_item, should_include_item
 from format_utils import format_location, log_location_resolution, format_job_line
+from opportunity_filters import LOCATION_MATCH
 
 
 def process_repo_entries(repo, listings_path, last_seen_sha, watch_paths, 
                         window_hours, date_field, date_fallback,
-                        seen=None, ttl_seconds=None, now_epoch=None):
-    """Get new entries from a single repository"""
+                        seen=None, ttl_seconds=None, now_epoch=None,
+                        location_gate=None, drop_counts=None):
+    """
+    Get new entries from a single repository.
+
+    location_gate: optional LocationMatcher; a listing passes only when it
+    classifies as LOCATION_MATCH. Drops are counted in drop_counts (a
+    Counter keyed "location:<outcome>") and never logged per listing.
+    """
     debug_log(f"[WATCH] Processing repo: {repo}, last_seen={last_seen_sha[:8] if last_seen_sha else 'None'}")
     
     commits = get_repo_entries(repo, per_page=20)
@@ -78,6 +86,7 @@ def process_repo_entries(repo, listings_path, last_seen_sha, watch_paths,
         commit_new_count = 0
         commit_window_count = 0
         commit_category_count = 0
+        commit_location_count = 0
         
         for item in after:
             key = get_dedup_key(item)
@@ -96,6 +105,14 @@ def process_repo_entries(repo, listings_path, last_seen_sha, watch_paths,
                     should_process, filter_reason = should_process_repo_item(item, repo)
                     if should_process:
                         commit_category_count += 1
+                        
+                        if location_gate is not None:
+                            outcome, _metros = location_gate.classify(item)
+                            if outcome != LOCATION_MATCH:
+                                if drop_counts is not None:
+                                    drop_counts[f"location:{outcome}"] += 1
+                                continue
+                        commit_location_count += 1
                         
                         # Check TTL cache to see if we should alert for this item (if TTL enabled)
                         should_alert = True
@@ -126,7 +143,7 @@ def process_repo_entries(repo, listings_path, last_seen_sha, watch_paths,
                                 "item": item
                             })
         
-        debug_log(f"[DELTA] {repo} → commit {sha[:8]} new_entries={commit_new_count}, after_window={commit_window_count}, after_category={commit_category_count}")
+        debug_log(f"[DELTA] {repo} → commit {sha[:8]} new_entries={commit_new_count}, after_window={commit_window_count}, after_category={commit_category_count}, after_location={commit_location_count}")
     
     debug_log(f"[SUMMARY] {repo} accumulated {len(all_new_entries)} new entries")
     return all_new_entries
