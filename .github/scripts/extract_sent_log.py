@@ -13,8 +13,8 @@ Usage:
   python .github/scripts/extract_sent_log.py channel-digest-private.yml --include-dry
   python .github/scripts/extract_sent_log.py --log-file saved_run.log     # parse a saved log
 
-Needs an authenticated gh. Runs still in progress, or whose logs are gone, are
-skipped with a note on stderr.
+Needs an authenticated gh. Exits 1 if gh cannot list the runs. Runs still in
+progress, or whose logs are gone, are skipped with a note on stderr.
 """
 import argparse
 import json
@@ -51,12 +51,13 @@ def _gh(args: List[str]) -> Optional[str]:
     return proc.stdout
 
 
-def recent_run_ids(workflow: str, limit: int, repo: Optional[str]) -> List[int]:
+def recent_run_ids(workflow: str, limit: int, repo: Optional[str]) -> Optional[List[int]]:
+    """Newest-first run ids, or None when gh could not list them."""
     args = ["run", "list", "--workflow", workflow, "--limit", str(limit), "--json", "databaseId"]
     if repo:
         args += ["--repo", repo]
     out = _gh(args)
-    return [run["databaseId"] for run in json.loads(out)] if out else []
+    return None if out is None else [run["databaseId"] for run in json.loads(out)]
 
 
 def run_log(run_id: int, repo: Optional[str]) -> Optional[str]:
@@ -90,7 +91,10 @@ def main(argv: Optional[List[str]] = None) -> int:
     if not args.workflow:
         parser.error("give a workflow, or --log-file")
 
-    for run_id in recent_run_ids(args.workflow, args.limit, args.repo):
+    run_ids = recent_run_ids(args.workflow, args.limit, args.repo)
+    if run_ids is None:
+        return 1  # gh failed: an empty result must not look like "no messages sent"
+    for run_id in run_ids:
         log = run_log(run_id, args.repo)
         if log is None:
             continue

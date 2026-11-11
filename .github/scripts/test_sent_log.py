@@ -199,6 +199,10 @@ class ExtractorTest(SentLogCase):
         self.assertEqual([r["dry_run"] for r in records], [False, False, True])
         self.assertTrue(all("messages" not in r for r in records))
 
+    def test_gh_failure_exits_nonzero(self):
+        with mock.patch.object(extract_sent_log, "_gh", return_value=None):
+            self.assertEqual(extract_sent_log.main(["dm-fast-watch.yml"]), 1)
+
     def test_round_trip_from_the_live_logger(self):
         post = mock.Mock(return_value=fake_response(200, {"ok": True, "result": {"message_id": 3}}))
         _, lines = self.send(dry=False, post=post)
