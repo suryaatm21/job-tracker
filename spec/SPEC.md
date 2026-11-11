@@ -5,8 +5,8 @@ The rules the bot must follow, in plain words. Every rule has an id, and the tes
 ## Message splitting (`telegram_utils.safe_join_lines`)
 
 - **BATCH-1** Splitting gives back exactly the input lines, in order. The first message starts with the header and a blank line; every later one starts with `(cont.)` and a blank line.
-- **BATCH-2** When every line fits, no message is longer than `max_chars`. Known bug: the first message can be `max_chars + 1`, because the count misses the blank line after the header.
-- **BATCH-3** No message is longer than Telegram's 4096 limit, counted in UTF-16 units (an emoji outside the Basic Multilingual Plane counts 2). This holds at the default 3900 limit for lines of up to 300 one-unit characters. Known bugs: a single line longer than the limit is sent as one oversized message, and emoji-heavy text overflows because the splitter counts each emoji as 1.
+- **BATCH-2** When every line fits, no message is longer than `max_chars`.
+- **BATCH-3** No message is longer than Telegram's 4096 limit, counted in UTF-16 units (an emoji outside the Basic Multilingual Plane counts 2). This holds at the default 3900 limit for lines of up to 300 one-unit characters.
 
 ## Role routing (`job_filtering`)
 
@@ -30,7 +30,7 @@ The rules the bot must follow, in plain words. Every rule has an id, and the tes
 
 ## DM location labels (`format_utils.format_location`)
 
-- **LOC-1** A multi-location DM says "California" exactly when one of its locations is in California. Otherwise it says "New York" exactly when one is in New York, and otherwise "New Jersey" exactly when one is in New Jersey. Known bugs: the code matches the letters "ca" and "nj" anywhere, so Chicago, Canada and Lancaster read as California, and Nanjing and Tianjin read as New Jersey.
+- **LOC-1** A multi-location DM says "California" exactly when one of its locations is in California. Otherwise it says "New York" exactly when one is in New York, and otherwise "New Jersey" exactly when one is in New Jersey.
 - **LOC-2** A single location is shown as given; several locations in a digest show as "Multi-location".
 
 ## Time windows (`state_utils.parse_epoch`, `send_digest_multi.parse_dt`)
