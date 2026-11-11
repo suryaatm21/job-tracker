@@ -152,7 +152,7 @@ Look for these log patterns:
 
 ### Dry run locally against live data (sends nothing):
 
-`DRY_RUN=true` makes every send path print the Telegram message as a `[DRY-SENT]` record (see [Sent-message log](#sent-message-log)) instead of sending it, and skips saving the seen cache and last-seen SHAs. Unset the Telegram credentials too, so a send path that missed the switch still cannot reach Telegram.
+`DRY_RUN=true` makes every send path print the Telegram message (a `BEGIN/END MESSAGE` block plus a `[DRY-SENT]` record, see [Sent-message log](#sent-message-log)) instead of sending it, and skips saving the seen cache and last-seen SHAs. Unset the Telegram credentials too, so a send path that missed the switch still cannot reach Telegram.
 
 ```bash
 # Set environment variables:

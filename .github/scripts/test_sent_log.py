@@ -62,7 +62,9 @@ class SentLogCase(unittest.TestCase):
                 mock.patch.object(telegram_utils.requests, "post", post or mock.Mock()), \
                 contextlib.redirect_stdout(out):
             result = telegram_utils.send_message(TOKEN, CHAT_ID, text, "HTML", **kwargs)
-        lines = [l for l in out.getvalue().split("\n") if l]
+        self.output = out.getvalue()
+        # Dry runs also print the readable BEGIN/END MESSAGE block; keep only the records.
+        lines = [l for l in self.output.split("\n") if l.startswith(("[SENT] ", "[DRY-SENT] "))]
         return result, lines
 
     def record(self, line, prefix):
@@ -104,6 +106,14 @@ class RecordFormatTest(SentLogCase):
         self.assertEqual(list(live_rec), list(dry_rec))
         self.assertEqual((dry_rec["ok"], dry_rec["dry_run"], live_rec["dry_run"]), (None, True, False))
         self.assertEqual(dry_rec["text"], live_rec["text"])
+
+    def test_dry_run_prints_readable_message_block_once_beside_the_record(self):
+        _, lines = self.send(dry=True)
+        self.assertEqual(len(lines), 1)
+        self.assertEqual(self.output.count("----- BEGIN MESSAGE -----"), 1)
+        self.assertEqual(self.output.count("----- END MESSAGE -----"), 1)
+        block = self.output.split("----- BEGIN MESSAGE -----\n")[1].split("\n----- END MESSAGE -----")[0]
+        self.assertEqual(block, TEXT)
 
     def test_explicit_label_overrides_env_and_unset_is_unknown(self):
         _, lines = self.send(dry=True, chat_label="hardware")
