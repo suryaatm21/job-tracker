@@ -31,6 +31,7 @@ concurrency:
   cancel-in-progress: false
 
 env:
+  TELEGRAM_CHAT_LABEL: 'pm' # chat name in the [SENT] message log (never the chat id)
   TARGET_REPOS: '["SimplifyJobs/Summer2027-Internships","vanshb03/Summer2027-Internships"]'
   LISTINGS_PATH: '.github/scripts/listings.json'
   DATE_FIELD: 'date_posted'

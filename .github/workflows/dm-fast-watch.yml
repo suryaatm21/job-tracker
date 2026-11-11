@@ -36,6 +36,7 @@ permissions:
   contents: read
 
 env:
+  TELEGRAM_CHAT_LABEL: 'dm' # chat name in the [SENT] message log (never the chat id)
   TARGET_REPOS: '["SimplifyJobs/Summer2027-Internships","vanshb03/Summer2027-Internships"]'
   WATCH_PATHS: '["listings.json", ".github/scripts/listings.json"]'
   LISTINGS_PATH: '.github/scripts/listings.json'

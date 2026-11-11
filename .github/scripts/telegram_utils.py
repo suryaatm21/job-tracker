@@ -6,8 +6,12 @@ Provides utilities to send messages to Telegram with automatic batching
 when messages exceed the 4096 character limit, while preserving line breaks
 and providing clear continuation headers.
 """
+import atexit
+import json
 import os
 import time
+from collections import Counter
+from datetime import datetime, timezone
 import requests
 from typing import List, Tuple, Optional
 
@@ -17,53 +21,160 @@ def is_dry_run() -> bool:
     return os.getenv("DRY_RUN", "false").strip().lower() in ("1", "true", "yes")
 
 
-def send_message(token: str, chat_id: str, text: str, parse_mode: Optional[str] = None) -> Tuple[bool, int, str]:
+# Sent-message log: one "[SENT] {json}" line per message (or "[DRY-SENT]" under
+# DRY_RUN) so the run log records exactly what the bot posted. The chat is a
+# human label from TELEGRAM_CHAT_LABEL (set per workflow), never the raw id.
+SENT_PREFIX = "[SENT]"
+DRY_SENT_PREFIX = "[DRY-SENT]"
+SUMMARY_PREFIX = "[SENT-SUMMARY]"
+UNKNOWN_CHAT_LABEL = "unknown"
+_ERROR_MAX_CHARS = 300
+
+_sent_counts: Counter = Counter()
+_failed_counts: Counter = Counter()
+_summary_registered = False
+
+
+def _chat_label(chat_label: Optional[str]) -> str:
+    return chat_label or os.getenv("TELEGRAM_CHAT_LABEL") or UNKNOWN_CHAT_LABEL
+
+
+def _scrub(text: str, *secrets: Optional[str]) -> str:
+    for secret in secrets:
+        if secret:
+            text = text.replace(str(secret), "[REDACTED]")
+    return text
+
+
+def _to_log_line(prefix: str, record: dict) -> str:
+    # Escape the characters str.splitlines() treats as line breaks but json.dumps
+    # leaves raw, so every record stays on one physical line.
+    body = json.dumps(record, ensure_ascii=False)
+    for raw, escaped in (("\u0085", "\\u0085"), ("\u2028", "\\u2028"), ("\u2029", "\\u2029")):
+        body = body.replace(raw, escaped)
+    return f"{prefix} {body}"
+
+
+def _telegram_result(ok: bool, status: int, body: str) -> Tuple[Optional[int], Optional[str]]:
+    """(message_id, error) from a sendMessage response."""
+    try:
+        parsed = json.loads(body)
+    except (TypeError, ValueError):
+        parsed = None
+    if ok:
+        result = parsed.get("result") if isinstance(parsed, dict) else None
+        return (result.get("message_id") if isinstance(result, dict) else None), None
+    if isinstance(parsed, dict) and parsed.get("description"):
+        return None, f"{status} {parsed['description']}"
+    return None, f"{status} {body}" if status else str(body)
+
+
+def log_sent(text: str, ok: Optional[bool], message_id: Optional[int] = None,
+             error: Optional[str] = None, chat_label: Optional[str] = None,
+             secrets: Tuple[Optional[str], ...] = ()) -> str:
+    """Print one sent-message record and count it for the run summary.
+
+    ok=None marks a dry run. Returns the printed line.
+    """
+    global _summary_registered
+    dry_run = ok is None
+    label = _chat_label(chat_label)
+    if error is not None:
+        error = _scrub(str(error), *secrets)[:_ERROR_MAX_CHARS]
+    record = {
+        "chat": label,
+        "dry_run": dry_run,
+        "ok": ok,
+        "message_id": message_id,
+        "error": error,
+        "chars": len(text),
+        "run_id": os.getenv("GITHUB_RUN_ID"),
+        "sha": os.getenv("GITHUB_SHA"),
+        "workflow": os.getenv("GITHUB_WORKFLOW"),
+        "ts": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+        "text": text,
+    }
+    line = _to_log_line(DRY_SENT_PREFIX if dry_run else SENT_PREFIX, record)
+    print(line, flush=True)
+
+    _sent_counts[label] += 1
+    if ok is False:
+        _failed_counts[label] += 1
+    if not _summary_registered:
+        atexit.register(print_sent_summary)
+        _summary_registered = True
+    return line
+
+
+def print_sent_summary() -> None:
+    """Print one [SENT-SUMMARY] line per chat this process sent to."""
+    for label in sorted(_sent_counts):
+        record = {
+            "chat": label,
+            "dry_run": is_dry_run(),
+            "messages": _sent_counts[label],
+            "failures": _failed_counts[label],
+            "run_id": os.getenv("GITHUB_RUN_ID"),
+            "sha": os.getenv("GITHUB_SHA"),
+            "workflow": os.getenv("GITHUB_WORKFLOW"),
+        }
+        print(_to_log_line(SUMMARY_PREFIX, record), flush=True)
+    _sent_counts.clear()
+    _failed_counts.clear()
+
+
+def send_message(token: str, chat_id: str, text: str, parse_mode: Optional[str] = None,
+                 chat_label: Optional[str] = None) -> Tuple[bool, int, str]:
     """
     Send a single message to Telegram.
 
     Every script the workflows run sends through here, so DRY_RUN is enforced
-    here: the message is printed and reported as sent, with no network call and
-    no credentials required.
-    
+    here (no network call, no credentials required) and every message, dry or
+    live, is logged once via log_sent().
+
     Args:
         token: Telegram bot token
-        chat_id: Target chat ID  
+        chat_id: Target chat ID
         text: Message text to send
         parse_mode: Optional parse mode ("HTML", "Markdown", etc.)
-    
+        chat_label: Chat name for the log; defaults to $TELEGRAM_CHAT_LABEL
+
     Returns:
         tuple[bool, int, str]: (success, status_code, response_body)
     """
     if is_dry_run():
-        print(f"[DRY-RUN] Would send {len(text)} chars (parse_mode={parse_mode}):")
-        print("----- BEGIN MESSAGE -----")
-        print(text)
-        print("----- END MESSAGE -----")
+        log_sent(text, None, chat_label=chat_label)
         return True, 200, "dry-run: not sent"
 
+    secrets = (token, chat_id)
     if not token or not chat_id:
-        return False, 0, "Missing token or chat_id"
-    
+        body = "Missing token or chat_id"
+        log_sent(text, False, error=body, chat_label=chat_label, secrets=secrets)
+        return False, 0, body
+
     payload = {
         "chat_id": chat_id,
         "text": text,
         "disable_web_page_preview": True
     }
-    
+
     if parse_mode:
         payload["parse_mode"] = parse_mode
-    
+
     try:
         response = requests.post(
             f"https://api.telegram.org/bot{token}/sendMessage",
             json=payload,
             timeout=30
         )
-        
-        return response.ok, response.status_code, response.text
-        
+        ok, status, body = response.ok, response.status_code, response.text
     except Exception as e:
-        return False, 0, f"Request failed: {e}"
+        # The exception text can include the request URL, which embeds the token.
+        ok, status, body = False, 0, _scrub(f"Request failed: {e}", *secrets)
+
+    message_id, error = _telegram_result(ok, status, body)
+    log_sent(text, ok, message_id=message_id, error=error, chat_label=chat_label, secrets=secrets)
+    return ok, status, body
 
 def safe_join_lines(header: str, lines: List[str], max_chars: int = 3900) -> List[str]:
     """
@@ -127,7 +238,8 @@ def batch_send_message(
     lines: List[str], 
     max_chars: int = 3900,
     sleep_ms: int = 250,
-    parse_mode: Optional[str] = None
+    parse_mode: Optional[str] = None,
+    chat_label: Optional[str] = None
 ) -> Tuple[bool, List[Tuple[int, int, str]]]:
     """
     Send a long message as multiple batched messages, preserving line integrity.
@@ -140,6 +252,7 @@ def batch_send_message(
         max_chars: Maximum characters per message (default 3900 for safety)
         sleep_ms: Delay between messages in milliseconds
         parse_mode: Optional parse mode ("HTML", "Markdown", etc.)
+        chat_label: Chat name for the sent-message log; defaults to $TELEGRAM_CHAT_LABEL
     
     Returns:
         tuple[bool, list]: (all_successful, [(batch_num, status_code, response_body), ...])
@@ -155,7 +268,7 @@ def batch_send_message(
     for i, batch in enumerate(batches, 1):
         print(f"[BATCH] {i}/{len(batches)}, chars={len(batch)}, lines={batch.count(chr(10))}")
         
-        success, status, body = send_message(token, chat_id, batch, parse_mode)
+        success, status, body = send_message(token, chat_id, batch, parse_mode, chat_label=chat_label)
         results.append((i, status, body))
         
         if not success:

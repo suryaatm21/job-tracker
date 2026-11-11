@@ -23,7 +23,7 @@ from state_utils import (
     get_cache_key, format_epoch_for_log
 )
 from format_utils import format_location, log_location_resolution, format_job_line
-from telegram_utils import batch_send_message
+from telegram_utils import batch_send_message, send_message
 
 # Configuration
 TARGET_REPOS = json.loads(os.environ.get("TARGET_REPOS", '["vanshb03/Summer2026-Internships"]'))
@@ -186,24 +186,11 @@ def send_telegram_batched(header, lines):
     full_message = f"{header}\n\n" + "\n\n".join(lines)
     if len(full_message) <= 4000:
         debug_log(f"[TELEGRAM] Sending single message: {len(full_message)} chars")
-        try:
-            response = requests.post(
-                f"https://api.telegram.org/bot{tok}/sendMessage",
-                json={
-                    "chat_id": chat,
-                    "text": full_message,
-                    "disable_web_page_preview": True,
-                    "parse_mode": "HTML"
-                },
-                timeout=30
-            )
-            debug_log(f"[TELEGRAM] Single message status: {response.status_code}")
-            if not response.ok:
-                debug_log(f"[TELEGRAM] Single message error: {response.text}")
-            return response.ok
-        except Exception as e:
-            debug_log(f"[TELEGRAM] Single message failed: {e}")
-            return False
+        ok, status, body = send_message(tok, chat, full_message, "HTML")
+        debug_log(f"[TELEGRAM] Single message status: {status}")
+        if not ok:
+            debug_log(f"[TELEGRAM] Single message error: {body}")
+        return ok
     
     # Use batching for long messages
     debug_log(f"[TELEGRAM] Message too long ({len(full_message)} chars), using batching")

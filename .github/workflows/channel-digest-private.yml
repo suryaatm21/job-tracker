@@ -30,6 +30,7 @@ concurrency:
   cancel-in-progress: false
 
 env:
+  TELEGRAM_CHAT_LABEL: 'private' # chat name in the [SENT] message log (never the chat id)
   WINDOW_HOURS: '48'
   SEEN_TTL_DAYS: '14'
   STATE_DIR: '.state/channel-digest-private'
