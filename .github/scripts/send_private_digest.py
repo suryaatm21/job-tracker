@@ -508,8 +508,6 @@ def report_dry_run(rendered, funnel, strong_threshold):
         batches = safe_join_lines(header, lines, MAX_TELEGRAM_MESSAGE_CHARS)
         print(f"\n----- {level}: {len(posted)} listings in {len(batches)} message(s) -----")
         for b in batches:
-            print(b)
-            print("·····")
             send_message(None, None, b, "HTML")  # DRY_RUN: logs a [DRY-SENT] record, sends nothing
         report["levels"][level] = {
             "messages": batches,
