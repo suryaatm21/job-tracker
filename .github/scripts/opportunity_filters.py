@@ -106,14 +106,9 @@ def _word_pattern(phrase):
     return re.compile(r"(?<![a-z])" + re.escape(phrase) + r"(?![a-z])")
 
 
-# DM label -> the words that name the state itself. Checked in this order.
-STATE_TERMS = {
-    "California": ("ca", "california"),
-    "New York": ("ny", "new york", "nyc", "new york city"),
-    "New Jersey": ("nj", "new jersey"),
-}
-_STATE_PATTERNS = {label: re.compile("|".join(_word_pattern(t).pattern for t in terms))
-                   for label, terms in STATE_TERMS.items()}
+# A state with no metro in config.json still gets a label by its own words.
+EXTRA_STATES = {"New Jersey": ("nj", "new jersey")}
+_CODE_AT_END = re.compile(r",\s*([a-z]{2})\s*$")
 
 
 class LocationMatcher:
@@ -139,16 +134,23 @@ class LocationMatcher:
         self.remote_patterns = [re.compile(p) for p in config.get("remote_patterns", [r"\bremote\b"])]
         self.filler_tokens = {t.lower() for t in config.get("filler_tokens", [])}
         self.metros = []
+        state_terms = {label: set(terms) for label, terms in EXTRA_STATES.items()}
         for metro in config.get("metros", []):
             tokens = {t.lower() for t in metro.get("state_tokens", [])}
+            state = max(tokens, key=len).title() if tokens else None
+            if state:
+                state_terms.setdefault(state, set()).update(tokens)
             self.metros.append({
                 "label": metro["label"],
-                "state": next((label for label, terms in STATE_TERMS.items() if tokens & set(terms)), None),
+                "state": state,
                 "cities": [_word_pattern(c.lower()) for c in metro.get("cities", [])],
                 "qualified": [_word_pattern(c.lower()) for c in metro.get("cities_needing_state", [])],
                 "bare": [_word_pattern(c.lower()) for c in metro.get("bare_names", [])],
                 "states": [_word_pattern(s.lower()) for s in metro.get("state_tokens", [])],
             })
+        self.state_patterns = {label: re.compile("|".join(_word_pattern(t).pattern for t in sorted(terms)))
+                               for label, terms in state_terms.items()}
+        self.state_codes = {t: label for label, terms in state_terms.items() for t in terms if len(t) == 2}
 
     def _is_remote(self, text):
         return any(p.search(text) for p in self.remote_patterns)
@@ -176,14 +178,19 @@ class LocationMatcher:
         return [metro["label"] for metro in self.metros if text and self._metro_matches(metro, text)]
 
     def states(self, location):
-        """State labels (California, New York, New Jersey) one location is in, in that order.
+        """State labels one location is in ("California", "New York", "New Jersey", ...).
 
-        A state counts when its code or name appears as a whole word, or when the
-        location is in one of its metros ("San Jose" is California).
+        A two-letter state code after the last comma decides alone, so "New York
+        Mills, MN" is Minnesota. Without one, a state counts when its name appears
+        as a whole word or the location is in one of its metros ("San Jose").
         """
         text = _norm_location(location)
+        code = _CODE_AT_END.search(text)
+        if code:
+            label = self.state_codes.get(code.group(1))
+            return [label] if label else []
         by_metro = {m["state"] for m in self.metros if text and m["state"] and self._metro_matches(m, text)}
-        return [label for label, pattern in _STATE_PATTERNS.items()
+        return [label for label, pattern in self.state_patterns.items()
                 if label in by_metro or pattern.search(text)]
 
     def match_one(self, location):

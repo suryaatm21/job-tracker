@@ -236,11 +236,12 @@ def safe_join_lines(header: str, lines: List[str], max_chars: int = 3900) -> Lis
     if not lines:
         header = _truncate_line(header, TELEGRAM_LIMIT)
         return [header] if header else []
-    header = _truncate_line(header, max(max_chars // 2, 2))
+    if tg_len(header) + 2 + tg_len(lines[0]) > TELEGRAM_LIMIT:
+        header = _truncate_line(header, max(max_chars // 2, 2))
 
-    # Room for a line alone in a batch under the longer of the two prefixes
-    room = TELEGRAM_LIMIT - max(tg_len(header) + 2, tg_len(CONT_PREFIX))
-    fitted = [_truncate_line(line, max(room, 2)) for line in lines]
+    first_room = TELEGRAM_LIMIT - tg_len(header) - 2
+    room = TELEGRAM_LIMIT - tg_len(CONT_PREFIX)
+    fitted = [_truncate_line(line, max(first_room if i == 0 else room, 2)) for i, line in enumerate(lines)]
 
     batches = []
     current_batch = []

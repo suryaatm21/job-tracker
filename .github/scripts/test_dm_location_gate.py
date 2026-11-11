@@ -157,6 +157,14 @@ class DmStateLabelTest(unittest.TestCase):
         self.assertEqual(format_location(["Chicago, IL", "Nanjing, China"], "dm"), "Multi-location")
 
 
+class StateCodeTest(unittest.TestCase):
+    def test_code_after_last_comma_decides(self):
+        from format_utils import format_location
+        self.assertEqual(format_location(["New York Mills, MN", "Seattle, WA"], "dm"), "Multi-location")
+        self.assertEqual(format_location(["New York, NY", "Seattle, WA"], "dm"), "New York")
+        self.assertEqual(format_location(["New York, United States", "Seattle, WA"], "dm"), "New York")
+
+
 class OversizedLineTest(unittest.TestCase):
     def test_html_line_is_truncated_outside_tags_with_tags_closed(self):
         import telegram_utils
@@ -184,6 +192,13 @@ class OversizedHeaderTest(unittest.TestCase):
             batches = telegram_utils.safe_join_lines(header, ["a line", "b" * 6000])
         self.assertIn("ERROR", out.getvalue())
         self.assertTrue(batches[0].startswith("H" * 100))
+        self.assertTrue(all(telegram_utils.tg_len(b) <= telegram_utils.TELEGRAM_LIMIT for b in batches))
+
+    def test_header_kept_whole_when_first_line_fits(self):
+        import telegram_utils
+        header = "H" * 3000
+        batches = telegram_utils.safe_join_lines(header, ["a" * 1000, "b" * 1000])
+        self.assertTrue(batches[0].startswith(header + "\n\n"))
         self.assertTrue(all(telegram_utils.tg_len(b) <= telegram_utils.TELEGRAM_LIMIT for b in batches))
 
     def test_lone_text_that_fits_is_not_cut(self):
