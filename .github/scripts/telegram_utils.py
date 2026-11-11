@@ -143,6 +143,10 @@ def send_message(token: str, chat_id: str, text: str, parse_mode: Optional[str] 
         tuple[bool, int, str]: (success, status_code, response_body)
     """
     if is_dry_run():
+        print(f"[DRY-RUN] Would send {len(text)} chars (parse_mode={parse_mode}):")
+        print("----- BEGIN MESSAGE -----")
+        print(text)
+        print("----- END MESSAGE -----")
         log_sent(text, None, chat_label=chat_label)
         return True, 200, "dry-run: not sent"
 
