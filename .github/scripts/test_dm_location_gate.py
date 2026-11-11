@@ -143,5 +143,30 @@ class PublicDigestStaysNationwide(unittest.TestCase):
                 self.assertTrue(send_digest_multi.should_include_listing(item))
 
 
+class DmStateLabelTest(unittest.TestCase):
+    def test_needing_state_city_names_its_state(self):
+        from format_utils import format_location
+        self.assertEqual(format_location(["San Jose", "Seattle, WA"], "dm"), "California")
+
+    def test_new_jersey_without_a_metro(self):
+        from format_utils import format_location
+        self.assertEqual(format_location(["Jersey City, NJ", "Seattle, WA"], "dm"), "New Jersey")
+
+    def test_no_state_is_multi_location(self):
+        from format_utils import format_location
+        self.assertEqual(format_location(["Chicago, IL", "Nanjing, China"], "dm"), "Multi-location")
+
+
+class OversizedHeaderTest(unittest.TestCase):
+    def test_header_is_truncated_and_every_batch_fits(self):
+        import telegram_utils
+        header = "H" * 5000
+        with contextlib.redirect_stdout(io.StringIO()) as out:
+            batches = telegram_utils.safe_join_lines(header, ["a line", "b" * 6000])
+        self.assertIn("ERROR", out.getvalue())
+        self.assertTrue(batches[0].startswith("H" * 100))
+        self.assertTrue(all(telegram_utils.tg_len(b) <= telegram_utils.TELEGRAM_LIMIT for b in batches))
+
+
 if __name__ == "__main__":
     unittest.main()

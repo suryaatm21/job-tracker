@@ -231,9 +231,9 @@ def safe_join_lines(header: str, lines: List[str], max_chars: int = 3900) -> Lis
         list[str]: List of message batches ready to send
     """
     max_chars = min(max_chars, TELEGRAM_LIMIT)
-    *leading, header = _split_line(header, max(max_chars // 2, 1))
-    if leading:
-        return leading + safe_join_lines(header, lines, max_chars)
+    if tg_len(header) > max_chars // 2:
+        print(f"ERROR: Telegram header is {tg_len(header)} units; truncating to {max_chars // 2}")
+        header = _split_line(header, max(max_chars // 2, 1))[0]
     if not lines:
         return [header] if header else []
 

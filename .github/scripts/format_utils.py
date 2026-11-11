@@ -5,40 +5,17 @@ Includes location formatting logic for different notification modes.
 """
 import json
 import os
-import re
 from functools import lru_cache
 
-# Metro city lists live in the private digest config. A metro's cities count for a
-# state through its state_tokens: "ca" -> SF Bay Area and Los Angeles, "ny" -> NYC.
-_METRO_CONFIG = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "private_channel", "config.json")
-# DM label -> state code first, then names. Checked in this order.
-_STATE_TERMS = {
-    "California": ("ca", "california"),
-    "New York": ("ny", "new york", "nyc", "new york city"),
-    "New Jersey": ("nj", "new jersey"),
-}
+from opportunity_filters import LocationMatcher, split_location
 
-
-def _word_pattern(terms):
-    """Match any of terms as whole words, so "ca" never matches inside "Chicago"."""
-    alternation = "|".join(re.escape(t) for t in sorted(set(terms), key=len, reverse=True))
-    return re.compile(r"(?<![a-z])(?:" + alternation + r")(?![a-z])")
+_CONFIG = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "private_channel", "config.json")
 
 
 @lru_cache(maxsize=1)
-def _state_patterns():
-    """(label, pattern) per state: its code, names, and the metro cities that need no state."""
-    try:
-        with open(_METRO_CONFIG, encoding="utf-8") as f:
-            metros = json.load(f).get("location", {}).get("metros", [])
-    except (OSError, ValueError):
-        metros = []
-    patterns = []
-    for label, terms in _STATE_TERMS.items():
-        cities = [c.lower() for m in metros if terms[0] in m.get("state_tokens", [])
-                  for c in m.get("cities", [])]
-        patterns.append((label, _word_pattern(list(terms) + cities)))
-    return patterns
+def _matcher():
+    with open(_CONFIG, encoding="utf-8") as f:
+        return LocationMatcher(json.load(f).get("location", {}))
 
 
 def format_location(locations, mode="digest"):
@@ -77,10 +54,10 @@ def format_location(locations, mode="digest"):
         return "Multi-location"
     
     elif mode == "dm":
-        # California, then New York, then New Jersey: whole words only, so
-        # Chicago is not "ca" and Nanjing is not "nj"
-        for label, pattern in _state_patterns():
-            if any(pattern.search(loc.lower()) for loc in valid_locations):
+        found = {label for loc in valid_locations for seg in split_location(loc)
+                 for label in _matcher().states(seg)}
+        for label in ("California", "New York", "New Jersey"):
+            if label in found:
                 return label
 
         # Default for multi-location in DM mode

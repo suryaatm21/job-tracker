@@ -106,6 +106,16 @@ def _word_pattern(phrase):
     return re.compile(r"(?<![a-z])" + re.escape(phrase) + r"(?![a-z])")
 
 
+# DM label -> the words that name the state itself. Checked in this order.
+STATE_TERMS = {
+    "California": ("ca", "california"),
+    "New York": ("ny", "new york", "nyc", "new york city"),
+    "New Jersey": ("nj", "new jersey"),
+}
+_STATE_PATTERNS = {label: re.compile("|".join(_word_pattern(t).pattern for t in terms))
+                   for label, terms in STATE_TERMS.items()}
+
+
 class LocationMatcher:
     """
     Match listing locations against configured metros.
@@ -130,8 +140,10 @@ class LocationMatcher:
         self.filler_tokens = {t.lower() for t in config.get("filler_tokens", [])}
         self.metros = []
         for metro in config.get("metros", []):
+            tokens = {t.lower() for t in metro.get("state_tokens", [])}
             self.metros.append({
                 "label": metro["label"],
+                "state": next((label for label, terms in STATE_TERMS.items() if tokens & set(terms)), None),
                 "cities": [_word_pattern(c.lower()) for c in metro.get("cities", [])],
                 "qualified": [_word_pattern(c.lower()) for c in metro.get("cities_needing_state", [])],
                 "bare": [_word_pattern(c.lower()) for c in metro.get("bare_names", [])],
@@ -162,6 +174,17 @@ class LocationMatcher:
         """Every metro label one location segment names, in config order ("SF/NYC" -> both)."""
         text = _norm_location(location)
         return [metro["label"] for metro in self.metros if text and self._metro_matches(metro, text)]
+
+    def states(self, location):
+        """State labels (California, New York, New Jersey) one location is in, in that order.
+
+        A state counts when its code or name appears as a whole word, or when the
+        location is in one of its metros ("San Jose" is California).
+        """
+        text = _norm_location(location)
+        by_metro = {m["state"] for m in self.metros if text and m["state"] and self._metro_matches(m, text)}
+        return [label for label, pattern in _STATE_PATTERNS.items()
+                if label in by_metro or pattern.search(text)]
 
     def match_one(self, location):
         """First metro label for a single location segment, or None."""
