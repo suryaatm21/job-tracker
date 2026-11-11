@@ -230,10 +230,13 @@ def safe_join_lines(header: str, lines: List[str], max_chars: int = 3900) -> Lis
     Returns:
         list[str]: List of message batches ready to send
     """
+    max_chars = min(max_chars, TELEGRAM_LIMIT)
+    *leading, header = _split_line(header, max(max_chars // 2, 1))
+    if leading:
+        return leading + safe_join_lines(header, lines, max_chars)
     if not lines:
         return [header] if header else []
 
-    max_chars = min(max_chars, TELEGRAM_LIMIT)
     # Room for a line alone in a batch under the longer of the two prefixes
     room = TELEGRAM_LIMIT - max(tg_len(header) + 2, tg_len(CONT_PREFIX))
     fitted = []
@@ -255,7 +258,7 @@ def safe_join_lines(header: str, lines: List[str], max_chars: int = 3900) -> Lis
             # Finish current batch
             if batches:
                 # Continuation batch
-                batch_text = "(cont.)\n\n" + "\n".join(current_batch)
+                batch_text = CONT_PREFIX + "\n".join(current_batch)
             else:
                 # First batch with header
                 batch_text = header + "\n\n" + "\n".join(current_batch)
@@ -264,7 +267,7 @@ def safe_join_lines(header: str, lines: List[str], max_chars: int = 3900) -> Lis
             
             # Start new batch
             current_batch = [line]
-            current_length = 10 + line_length  # 10 for "(cont.)\n\n"
+            current_length = tg_len(CONT_PREFIX) + line_length
         else:
             # Add line to current batch
             current_batch.append(line)
@@ -274,7 +277,7 @@ def safe_join_lines(header: str, lines: List[str], max_chars: int = 3900) -> Lis
     if current_batch:
         if batches:
             # Final continuation batch
-            batch_text = "(cont.)\n\n" + "\n".join(current_batch)
+            batch_text = CONT_PREFIX + "\n".join(current_batch)
         else:
             # Single batch with header
             batch_text = header + "\n\n" + "\n".join(current_batch)
