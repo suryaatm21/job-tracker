@@ -31,7 +31,7 @@ from state_utils import (
 from format_utils import format_location, log_location_resolution, format_job_line
 from telegram_utils import send_message, batch_send_message, is_dry_run, tg_len
 from repo_utils import resolve_listings_source, get_repo_entries, fetch_listings
-from dedup_utils import get_dedup_key, get_unified_season, to_epoch
+from dedup_utils import get_dedup_key, get_unified_season, in_window
 from job_filtering import should_process_repo_item
 from watcher_core import process_repo_entries
 from opportunity_filters import metro_subset_matcher, LOCATION_ELSEWHERE, LOCATION_REMOTE, LOCATION_UNKNOWN
@@ -167,7 +167,7 @@ def window_listings(repo, now_epoch):
         return []
     if not isinstance(listings, list):
         raise ValueError(f"expected a list of listings, got {type(listings).__name__}")
-    return [x for x in listings if to_epoch(x.get(DATE_FIELD, x.get(DATE_FALLBACK))) >= cutoff]
+    return [x for x in listings if in_window(x, cutoff, DATE_FIELD, DATE_FALLBACK)]
 
 
 def main():
