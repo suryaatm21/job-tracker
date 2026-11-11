@@ -6,3 +6,9 @@ tests/
 references/
 .venv/
 venv/
+# Test tooling caches
+.hypothesis/
+.pytest_cache/
+
+# Local spec-lock override (see docs/TESTING.md)
+/.spec-unlock

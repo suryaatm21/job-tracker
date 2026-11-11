@@ -1,0 +1,13 @@
+diff --git a/.github/scripts/state_utils.py b/.github/scripts/state_utils.py
+index fdbcff5..60eb34f 100644
+--- a/.github/scripts/state_utils.py
++++ b/.github/scripts/state_utils.py
+@@ -178,7 +178,7 @@ def should_alert_item(item, seen, ttl_seconds, now_epoch):
+         # Within grace period - fall through to TTL check
+     
+     # Check if TTL has expired (covers both normal TTL and post-grace-period cases)
+-    if now_epoch - last_alert > ttl_seconds:
++    if now_epoch - last_alert >= ttl_seconds:
+         return True, "ttl_expired"
+     
+     # Suppress: within TTL and no recent update (or update within grace period)

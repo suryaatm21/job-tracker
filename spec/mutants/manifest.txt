@@ -1,0 +1,15 @@
+# Planted bugs for spec/run_mutants.sh. One per line: <status> <patch file> <what it plants>
+#   active   the checks must catch it today; a survivor fails CI
+#   pending  cannot be caught until the named known bug is fixed; CI fails if it is
+#            caught anyway, so the fix that makes it catchable must also mark it active
+active  M1_ttl_boundary_inclusive.patch      memory alerts at exactly ttl instead of one second after (SEEN-1)
+active  M2_drop_reopen_grace_check.patch     any update after the last alert counts as a reopen (SEEN-3)
+active  M3_grace_one_hour.patch              reopen grace period of 1 hour instead of 1 day (SEEN-3)
+pending M4_batch_limit_slack.patch           splitter allows 200 characters over max_chars (BATCH-2; waits on the BATCH-2 fix)
+active  M5_drop_lone_final_line.patch        a final batch with one line is dropped (BATCH-1)
+active  M6_hardware_label_in_dm_map.patch    Hardware label maps to a DM category (ROUTE-1, ROUTE-2)
+active  M7_hardware_in_dm_allowed_set.patch  Hardware Engineering added to the code's DM set (ROUTE-1)
+active  M8_dedup_keeps_trailing_slash.patch  dedup key keeps a trailing slash (DEDUP-1)
+active  M9_dedup_case_sensitive.patch        dedup key keeps host letter case (DEDUP-1)
+active  M10_drop_new_york_label.patch        DM never says New York (LOC-1)
+active  M11_drop_new_jersey_label.patch      DM never says New Jersey (LOC-1)

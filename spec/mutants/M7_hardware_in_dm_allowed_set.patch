@@ -1,0 +1,12 @@
+diff --git a/.github/scripts/job_filtering.py b/.github/scripts/job_filtering.py
+index 368ad9e..62f70ae 100644
+--- a/.github/scripts/job_filtering.py
++++ b/.github/scripts/job_filtering.py
+@@ -53,6 +53,7 @@ DIGEST_CATEGORY_MAPPING = {**SIMPLIFY_CATEGORY_MAPPING, **DIGEST_ONLY_CATEGORY_M
+ # Category filtering: Only allow these categories for DM alerts (strict filtering)
+ ALLOWED_CATEGORIES_DM = {
+     "Software Engineering", 
++    "Hardware Engineering",
+     "Data Science, AI & Machine Learning"
+ }
+ 

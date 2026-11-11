@@ -35,7 +35,7 @@ CHANNELS = {
     "Job Tracker Channel (private, was PhD/MS)": "TELEGRAM_CHAT_ID_CHANNEL_SWE_ML_PHD",
 }
 
-def test_channel(name, env_var):
+def check_channel(name, env_var):
     """Test sending a message to a single channel"""
     token = os.getenv("TELEGRAM_BOT_TOKEN")
     chat_id = os.getenv(env_var)
@@ -68,7 +68,7 @@ def main():
     
     results = {}
     for name, env_var in CHANNELS.items():
-        result = test_channel(name, env_var)
+        result = check_channel(name, env_var)
         results[name] = result
         print()
     

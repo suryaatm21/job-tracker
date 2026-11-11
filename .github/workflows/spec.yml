@@ -1,0 +1,48 @@
+name: Spec
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+# No Telegram secrets are passed to these jobs, and DRY_RUN makes every send path print instead.
+env:
+  DRY_RUN: "true"
+  HYPOTHESIS_PROFILE: ci
+  PYTHONDONTWRITEBYTECODE: "1"
+
+jobs:
+  spec:
+    name: spec
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with: { python-version: '3.12' }
+      - run: pip install -r requirements-dev.txt
+      - name: Unit tests
+        run: python -m unittest discover -s .github/scripts -p 'test_*.py'
+      - name: Spec property tests
+        run: python -m pytest spec -p no:cacheprovider -rxXf
+
+  planted-bugs:
+    name: planted-bugs
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with: { python-version: '3.12' }
+      - run: pip install -r requirements-dev.txt
+      - name: Unknown mutant ids are rejected
+        run: |
+          if bash spec/run_mutants.sh M0-no-such-mutant; then
+            echo "run_mutants.sh accepted an id that is not in the manifest" >&2
+            exit 1
+          fi
+      - name: Every planted bug must be caught
+        run: bash spec/run_mutants.sh

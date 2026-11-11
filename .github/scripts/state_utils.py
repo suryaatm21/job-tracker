@@ -171,7 +171,7 @@ def should_alert_item(item, seen, ttl_seconds, now_epoch):
     # Check if job was re-opened (updated after last alert) with grace period
     updated_epoch = parse_epoch(item.get("date_updated")) or parse_epoch(item.get("date_posted"))
     if updated_epoch is not None and updated_epoch > last_alert:
-        # Grace period: only treat as reopen if update is at least 1 hour after last alert
+        # Grace period: only treat as reopen if update is at least 1 day (REOPEN_GRACE_PERIOD) after last alert
         # This prevents identical re-additions with bumped timestamps from bypassing TTL
         if updated_epoch - last_alert >= REOPEN_GRACE_PERIOD:
             return True, "reopen"
