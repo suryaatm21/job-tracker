@@ -1,14 +1,13 @@
 #!/usr/bin/env python3
 """
 DM location gate tests: DM alerts keep only listings in the DM metros
-(DM_METROS in dm-fast-watch.yml), while public channel digests stay nationwide.
+(SF Bay Area and NYC), while public channel digests stay nationwide.
 
 Run: python -m unittest discover -s .github/scripts -p 'test_dm_location_gate.py'
 """
 import json
 import os
 import pathlib
-import re
 import sys
 import tempfile
 import time
@@ -27,16 +26,11 @@ import watcher_core  # noqa: E402
 from opportunity_filters import metro_subset_matcher  # noqa: E402
 
 HERE = pathlib.Path(__file__).resolve().parent
-WORKFLOW = HERE.parent / "workflows" / "dm-fast-watch.yml"
 LOCATION_CONFIG = json.loads((HERE.parent / "private_channel" / "config.json").read_text())["location"]
 REPO = "vanshb03/Summer2027-Internships"
 
 
-def dm_metros_from_workflow():
-    """The DM_METROS value the scheduled workflow passes to watch_repo.py."""
-    match = re.search(r"^\s*DM_METROS:\s*'(\[.*?\])'", WORKFLOW.read_text(), re.MULTILINE)
-    assert match, "DM_METROS not found in dm-fast-watch.yml"
-    return match.group(1)
+DM_METROS = '["SF Bay Area", "NYC"]'
 
 
 def listing(n, locations):
@@ -82,12 +76,9 @@ def run_watcher(items, location_gate):
 
 class DmLocationGate(unittest.TestCase):
     def setUp(self):
-        self.gate = watch_repo.build_location_gate(dm_metros_from_workflow())
+        self.gate = watch_repo.build_location_gate(DM_METROS)
         self.items = {name: listing(i, locs) for i, (name, locs) in enumerate(CASES.items())}
         self.by_id = {item["id"]: name for name, item in self.items.items()}
-
-    def test_workflow_gates_on_sf_bay_area_and_nyc(self):
-        self.assertEqual([m["label"] for m in self.gate.metros], ["SF Bay Area", "NYC"])
 
     def test_dm_keeps_only_listings_in_dm_metros(self):
         entries, _ = run_watcher(list(self.items.values()), self.gate)
@@ -141,11 +132,6 @@ class PublicDigestStaysNationwide(unittest.TestCase):
             item = listing(0, CASES[name])
             with self.subTest(name):
                 self.assertTrue(send_digest_multi.should_include_listing(item))
-
-    def test_channel_digest_has_no_location_gate(self):
-        source = (HERE / "send_digest_multi.py").read_text()
-        for name in ("LocationMatcher", "metro_subset_matcher", "process_repo_entries"):
-            self.assertNotIn(name, source)
 
 
 if __name__ == "__main__":

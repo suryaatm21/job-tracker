@@ -130,7 +130,6 @@ jobs:
           FORCE_WINDOW_HOURS: ${{ github.event.inputs.force_window_hours }}
           RESET_LAST_SEEN: ${{ github.event.inputs.reset_last_seen }}
           BACK_ONE: ${{ github.event.inputs.back_one }}
-          DM_METROS: ${{ env.DM_METROS }}
         run: python .github/scripts/watch_repo.py
 
       - name: Save watcher state
