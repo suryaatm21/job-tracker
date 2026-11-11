@@ -85,3 +85,7 @@ def to_epoch(v):
             return int(datetime.fromisoformat(str(v)).timestamp())
         except Exception:
             return -1
+
+
+def in_window(item, cutoff, date_field, date_fallback):
+    return to_epoch(item.get(date_field, item.get(date_fallback))) >= cutoff

@@ -8,7 +8,7 @@ import time
 from github_helper import debug_log
 from repo_utils import get_repo_entries, commit_detail, get_file_at, watched
 from job_filtering import should_process_repo_item
-from dedup_utils import get_dedup_key, get_primary_url, get_unified_season, in_window
+from dedup_utils import get_dedup_key, get_primary_url, get_unified_season, in_window, to_epoch
 from state_utils import should_alert_item, should_include_item
 from format_utils import format_location, log_location_resolution, format_job_line
 from opportunity_filters import LOCATION_MATCH
@@ -94,6 +94,7 @@ def process_repo_entries(repo, listings_path, last_seen_sha, watch_paths,
                 commit_new_count += 1
                 
                 # Apply time window filter first
+                ts = to_epoch(item.get(date_field, item.get(date_fallback)))
                 cutoff = time.time() - (window_hours * 3600.0)
                 
                 if in_window(item, cutoff, date_field, date_fallback):
