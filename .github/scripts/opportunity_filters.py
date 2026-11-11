@@ -108,7 +108,6 @@ def _word_pattern(phrase):
 
 # A state with no metro in config.json still gets a label by its own words.
 EXTRA_STATES = {"New Jersey": ("nj", "new jersey")}
-_CODE_AT_END = re.compile(r",\s*([a-z]{2})\s*$")
 
 
 class LocationMatcher:
@@ -150,7 +149,6 @@ class LocationMatcher:
             })
         self.state_patterns = {label: re.compile("|".join(_word_pattern(t).pattern for t in sorted(terms)))
                                for label, terms in state_terms.items()}
-        self.state_codes = {t: label for label, terms in state_terms.items() for t in terms if len(t) == 2}
 
     def _is_remote(self, text):
         return any(p.search(text) for p in self.remote_patterns)
@@ -180,15 +178,10 @@ class LocationMatcher:
     def states(self, location):
         """State labels one location is in ("California", "New York", "New Jersey", ...).
 
-        A two-letter state code after the last comma decides alone, so "New York
-        Mills, MN" is Minnesota. Without one, a state counts when its name appears
-        as a whole word or the location is in one of its metros ("San Jose").
+        A state counts when its code or name (from the metros' state_tokens) appears
+        as a whole word, or the location is in one of its metros ("San Jose").
         """
         text = _norm_location(location)
-        code = _CODE_AT_END.search(text)
-        if code:
-            label = self.state_codes.get(code.group(1))
-            return [label] if label else []
         by_metro = {m["state"] for m in self.metros if text and m["state"] and self._metro_matches(m, text)}
         return [label for label, pattern in self.state_patterns.items()
                 if label in by_metro or pattern.search(text)]

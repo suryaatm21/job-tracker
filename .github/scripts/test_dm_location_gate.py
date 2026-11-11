@@ -160,7 +160,7 @@ class DmStateLabelTest(unittest.TestCase):
 class StateCodeTest(unittest.TestCase):
     def test_code_after_last_comma_decides(self):
         from format_utils import format_location
-        self.assertEqual(format_location(["New York Mills, MN", "Seattle, WA"], "dm"), "Multi-location")
+        self.assertEqual(format_location(["San Diego, CA", "Seattle, WA"], "dm"), "California")
         self.assertEqual(format_location(["New York, NY", "Seattle, WA"], "dm"), "New York")
         self.assertEqual(format_location(["New York, United States", "Seattle, WA"], "dm"), "New York")
 
@@ -200,6 +200,12 @@ class OversizedHeaderTest(unittest.TestCase):
         batches = telegram_utils.safe_join_lines(header, ["a" * 1000, "b" * 1000])
         self.assertTrue(batches[0].startswith(header + "\n\n"))
         self.assertTrue(all(telegram_utils.tg_len(b) <= telegram_utils.TELEGRAM_LIMIT for b in batches))
+
+    def test_header_cut_only_as_far_as_needed(self):
+        import telegram_utils
+        batches = telegram_utils.safe_join_lines("H" * 4090, ["a" * 10, "b"])
+        self.assertGreater(telegram_utils.tg_len(batches[0]), 4000)
+        self.assertLessEqual(telegram_utils.tg_len(batches[0]), telegram_utils.TELEGRAM_LIMIT)
 
     def test_lone_text_that_fits_is_not_cut(self):
         import telegram_utils

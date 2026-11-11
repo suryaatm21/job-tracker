@@ -237,7 +237,7 @@ def safe_join_lines(header: str, lines: List[str], max_chars: int = 3900) -> Lis
         header = _truncate_line(header, TELEGRAM_LIMIT)
         return [header] if header else []
     if tg_len(header) + 2 + tg_len(lines[0]) > TELEGRAM_LIMIT:
-        header = _truncate_line(header, max(max_chars // 2, 2))
+        header = _truncate_line(header, max(max_chars // 2, TELEGRAM_LIMIT - 2 - tg_len(lines[0])))
 
     first_room = TELEGRAM_LIMIT - tg_len(header) - 2
     room = TELEGRAM_LIMIT - tg_len(CONT_PREFIX)
