@@ -186,6 +186,10 @@ class OversizedHeaderTest(unittest.TestCase):
         self.assertTrue(batches[0].startswith("H" * 100))
         self.assertTrue(all(telegram_utils.tg_len(b) <= telegram_utils.TELEGRAM_LIMIT for b in batches))
 
+    def test_lone_text_that_fits_is_not_cut(self):
+        import telegram_utils
+        self.assertEqual(telegram_utils.safe_join_lines("x" * 4050, []), ["x" * 4050])
+
 
 if __name__ == "__main__":
     unittest.main()

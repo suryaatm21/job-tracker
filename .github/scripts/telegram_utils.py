@@ -233,10 +233,10 @@ def safe_join_lines(header: str, lines: List[str], max_chars: int = 3900) -> Lis
         list[str]: List of message batches ready to send
     """
     max_chars = min(max_chars, TELEGRAM_LIMIT)
-    if tg_len(header) > max_chars // 2:
-        header = _truncate_line(header, max(max_chars // 2, 2))
     if not lines:
+        header = _truncate_line(header, TELEGRAM_LIMIT)
         return [header] if header else []
+    header = _truncate_line(header, max(max_chars // 2, 2))
 
     # Room for a line alone in a batch under the longer of the two prefixes
     room = TELEGRAM_LIMIT - max(tg_len(header) + 2, tg_len(CONT_PREFIX))
