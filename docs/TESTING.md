@@ -4,6 +4,26 @@
 
 This guide outlines how to manually test the job tracker workflows to ensure multi-repository support, deduplication, and notification delivery work as expected.
 
+## Spec and automated checks
+
+`spec/SPEC.md` lists the bot's rules in plain words, each with an id such as `SEEN-3`. The property tests in `spec/test_*_props.py` check the code against each rule over many generated inputs ([Hypothesis](https://hypothesis.readthedocs.io/)), and their names carry the rule id. A test for a rule the code breaks today is marked `xfail(strict=True, reason="<id>")`: it must keep failing, so the PR that fixes the bug also removes the marker. `spec/test_spec_index.py` checks that every rule has a test and that the markers match the rules SPEC.md calls known bugs.
+
+Run everything locally (no network, nothing sent to Telegram):
+
+```bash
+python -m venv .venv && .venv/bin/pip install -r requirements-dev.txt
+export DRY_RUN=true HYPOTHESIS_PROFILE=ci   # ci: fixed search order, same inputs as CI
+.venv/bin/python -m unittest discover -s .github/scripts -p 'test_*.py'
+.venv/bin/python -m pytest spec -p no:cacheprovider -rxXf
+PYTHON=.venv/bin/python bash spec/run_mutants.sh          # or: ... run_mutants.sh M3 M8
+```
+
+**Planted bugs.** `spec/mutants/` holds one-line bugs as patches, listed in `spec/mutants/manifest.txt`. `spec/run_mutants.sh` first checks that both suites pass on unchanged code, then applies each patch, runs both suites, requires a failure, and restores the file (it verifies the restore). An `active` mutant that survives fails the run, which is how a weakened property gets noticed. A `pending` mutant cannot be caught until a known bug is fixed (M4 waits on BATCH-2); if it is caught anyway the run fails, so the fix marks it `active`. A patch that no longer applies fails as stale: regenerate it against the current code.
+
+**CI.** `.github/workflows/spec.yml` runs on every pull request and on pushes to `main`, with `DRY_RUN=true` and no Telegram secrets. Job `spec` runs both suites; job `planted-bugs` runs the mutant check.
+
+**Spec lock.** `.claude/settings.json` registers a Claude Code PreToolUse hook (`.claude/hooks/spec_lock.py`) that denies Edit, Write and MultiEdit on `spec/**` and `.github/workflows/spec.yml`. A task may unlock the spec only when its instructions explicitly say so. To unlock, create an empty `.spec-unlock` file at the repository root (it is gitignored, so it unlocks only that checkout), and delete it when the task is done. The hook guards against accidents only: it does not see shell commands, and CI is what catches a weakened spec.
+
 ## Prerequisites
 
 Ensure GitHub repository secrets are configured:
@@ -29,7 +49,7 @@ Ensure GitHub repository secrets are configured:
 
 - Script processes configured repos (e.g. SimplifyJobs and vanshb03)
 - Detects default branches and listings paths automatically
-- Deduplicates listings across repos using: `id` → `normalized_url` → `(company.lower(), title.lower())`
+- Deduplicates listings across repos using: `normalized_url` → `id` → `(company.lower(), title.lower())` (URL first: repos reuse ids; see `dedup_utils.get_dedup_key` and SPEC rule DEDUP-4)
 - Sends single consolidated message to DM chat
 - Logs show: "Starting multi-repo watch for: [...]", "Found listings file at...", "After deduplication: X unique entries"
 
