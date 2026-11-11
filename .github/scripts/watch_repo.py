@@ -226,6 +226,7 @@ def main():
         
         debug_log(f"[STATE] {repo} last_seen_SHA: {last_seen[:8] if last_seen else 'None'}")
         
+        rebuilt_now = False
         try:
             if rebuilding and not repo_rebuilt(STATE_DIR, repo):
                 try:
@@ -236,7 +237,7 @@ def main():
                     rebuild_failed.append(repo)
                     continue
                 debug_log(f"[REBUILD] {repo} marked {added} keys from {len(in_window)} in-window listings as seen")
-                rebuilt_repos.append(repo)
+                rebuilt_now = True
             else:
                 # Detect listings path on the repo's actual default branch
                 _branch, listings_path = resolve_listings_source(repo, LISTINGS_PATH)
@@ -259,17 +260,25 @@ def main():
                 else:
                     last_file.write_text(newest_sha)
                     debug_log(f"[STATE] {repo} updated last_seen_SHA: {newest_sha[:8]}")
+            if rebuilt_now:
+                # Only now are both its memory keys and its commit position current
+                rebuilt_repos.append(repo)
         
         except Exception as e:
             debug_log(f"[ERROR] {repo} processing failed: {e}")
+            if rebuilt_now:
+                # Its commit position was not saved; replaying from the old one could repost
+                rebuild_failed.append(repo)
             continue
     
     if rebuilding and rebuilt_repos:
-        save_seen(seen, SEEN_TTL_DAYS, str(seen_cache_path), dry_run=DRY_RUN,
-                  mark_version=not rebuild_failed)
-        if not DRY_RUN:
+        saved = save_seen(seen, SEEN_TTL_DAYS, str(seen_cache_path), dry_run=DRY_RUN,
+                          mark_version=not rebuild_failed)
+        if saved:
             for repo in rebuilt_repos:
                 mark_repo_rebuilt(STATE_DIR, repo)
+        elif not DRY_RUN:
+            debug_log(f"[REBUILD] Seen cache save failed; {rebuilt_repos} stay in rebuild mode")
     if rebuild_failed:
         debug_log(f"[REBUILD] Could not fetch {rebuild_failed}; they stay silent and retry next run")
 

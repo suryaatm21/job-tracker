@@ -184,10 +184,14 @@ def save_seen(seen, ttl_days, path=".state/seen.json", max_entries=200000, dry_r
         path: str, file path to save to
         max_entries: int, maximum entries to keep (sorted by most recent)
         dry_run: bool, if True write nothing (a dry run must not mark unsent items as seen)
+
+    Returns:
+        bool: True when seen.json was written. False on a dry run or a failed write,
+        so callers can hold back anything that depends on the memory being saved.
     """
     if dry_run:
         print(f"[DRY-RUN] Not saving seen cache ({len(seen)} entries) to {path}")
-        return
+        return False
     try:
         # Ensure state directory exists
         seen_path = pathlib.Path(path)
@@ -216,9 +220,10 @@ def save_seen(seen, ttl_days, path=".state/seen.json", max_entries=200000, dry_r
         pruned_count = len(seen) - len(pruned_seen)
         if pruned_count > 0:
             print(f"Pruned {pruned_count} old entries from seen cache (TTL={ttl_days}d)")
-            
+        return True
     except Exception as e:
         print(f"Warning: Failed to save seen cache to {path}: {e}")
+        return False
 
 def should_alert_item(item, seen, ttl_seconds, now_epoch):
     """

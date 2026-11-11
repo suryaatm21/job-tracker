@@ -233,6 +233,9 @@ def main():
             listings = get_listings(repo)
             if not listings:
                 debug_log(f"[REPO] {repo} → No listings found")
+                if rebuilding and not repo_rebuilt(STATE_DIR, repo):
+                    # Fetched fine and holds nothing to translate: its rebuild is complete
+                    rebuilt_repos.append(repo)
                 continue
             
             debug_log(f"[REPO] {repo} → {len(listings)} total items")
@@ -275,10 +278,12 @@ def main():
         added = rebuild_seen(seen, rebuild_items, now_epoch)
         debug_log(f"[REBUILD] Seen cache holds older keys: marked {added} keys from "
                   f"{len(rebuild_items)} in-window items of {rebuilt_repos} as seen; sending nothing for them")
-        save_seen(seen, SEEN_TTL_DAYS, str(seen_cache_path), dry_run=DRY_RUN, mark_version=not failed_repos)
-        if not DRY_RUN:
+        saved = save_seen(seen, SEEN_TTL_DAYS, str(seen_cache_path), dry_run=DRY_RUN, mark_version=not failed_repos)
+        if saved:
             for repo in rebuilt_repos:
                 mark_repo_rebuilt(STATE_DIR, repo)
+        elif not DRY_RUN:
+            debug_log(f"[REBUILD] Seen cache save failed; {rebuilt_repos} stay in rebuild mode")
     if rebuilding and failed_repos:
         debug_log(f"[REBUILD] Could not fetch {failed_repos}; they stay silent and retry next run")
     

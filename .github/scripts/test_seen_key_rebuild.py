@@ -110,6 +110,18 @@ def failing_fetch(status):
     return stack, resolve
 
 
+def failing_seen_save():
+    """Make writing seen.json fail while every other state file still writes."""
+    real = state_utils.write_atomic
+
+    def write(path, text):
+        if pathlib.Path(path).name == "seen.json":
+            raise OSError("disk full")
+        return real(path, text)
+
+    return mock.patch.object(state_utils, "write_atomic", side_effect=write)
+
+
 class DigestSilentFirstRun(StateDirTestCase):
     def run_digest(self, listings, dry_run=False, status=None):
         send = mock.Mock(return_value=(True, []))
@@ -119,10 +131,10 @@ class DigestSilentFirstRun(StateDirTestCase):
                 stack.enter_context(patch)
             return self._run_digest(send, dry_run)
 
-    def _run_digest(self, send, dry_run):
+    def _run_digest(self, send, dry_run, repos=(REPO,)):
         with mock.patch.object(send_digest_multi, "STATE_DIR", self.state), \
                 mock.patch.object(send_digest_multi, "DRY_RUN", dry_run), \
-                mock.patch.object(send_digest_multi, "TARGET_REPOS", [REPO]), \
+                mock.patch.object(send_digest_multi, "TARGET_REPOS", list(repos)), \
                 mock.patch.object(send_digest_multi, "batch_send_message", send), \
                 mock.patch.dict(os.environ, {"TELEGRAM_BOT_TOKEN": "t", "TELEGRAM_CHAT_ID": "c"}):
             self.assertTrue(send_digest_multi.main())
@@ -173,6 +185,39 @@ class DigestSilentFirstRun(StateDirTestCase):
         send.assert_not_called()
         self.assertEqual(self.marker.read_text().strip(), str(state_utils.SEEN_KEY_VERSION))
 
+    def test_failed_memory_save_keeps_the_repo_in_rebuild_mode(self):
+        self.write_legacy_memory()
+        with failing_seen_save():
+            send = self.run_digest([SENT, SIBLING])
+        send.assert_not_called()
+        self.assertFalse(state_utils.repo_rebuilt(self.state, REPO))
+        self.assertFalse(self.marker.exists())
+        send = self.run_digest([SENT, SIBLING])  # retries the rebuild instead of posting
+        send.assert_not_called()
+        self.assertTrue(state_utils.repo_rebuilt(self.state, REPO))
+
+    def test_empty_repo_completes_its_rebuild_while_another_repo_fails(self):
+        other = "other/Repo"
+        self.write_legacy_memory()
+
+        def run(empty_repo_listings):
+            send = mock.Mock(return_value=(True, []))
+
+            def listings(repo):
+                if repo == other:
+                    raise RuntimeError("boom")
+                return empty_repo_listings
+
+            with mock.patch.object(send_digest_multi, "get_listings", side_effect=listings):
+                self._run_digest(send, dry_run=False, repos=(REPO, other))
+            return send
+
+        run([]).assert_not_called()
+        self.assertTrue(state_utils.repo_rebuilt(self.state, REPO))
+        self.assertFalse(state_utils.repo_rebuilt(self.state, other))
+        self.assertFalse(self.marker.exists())
+        self.assertEqual(self.sent_urls(run([NEW])), {NEW["url"]})
+
     def test_dry_run_rebuild_writes_nothing(self):
         self.write_legacy_memory()
         before = self.seen_path.read_text()
@@ -185,15 +230,16 @@ class DigestSilentFirstRun(StateDirTestCase):
 class WatcherSilentFirstRun(StateDirTestCase):
     HEAD = "c" * 40
 
-    def run_watcher(self, listings, entries=()):
+    def run_watcher(self, listings, entries=(), commits=None):
         send = mock.Mock(return_value=True)
         process = mock.Mock(return_value=list(entries))
+        commits = commits or mock.Mock(return_value=[{"sha": self.HEAD}])
         with mock.patch.object(watch_repo, "STATE_DIR", self.state), \
                 mock.patch.object(watch_repo, "DRY_RUN", False), \
                 mock.patch.object(watch_repo, "TARGET_REPOS", [REPO]), \
                 mock.patch.object(watch_repo, "fetch_listings", **({"new": repo_utils.fetch_listings} if listings is None else {"return_value": listings})), \
                 mock.patch.object(watch_repo, "resolve_listings_source", return_value=("dev", "listings.json")), \
-                mock.patch.object(watch_repo, "get_repo_entries", return_value=[{"sha": self.HEAD}]), \
+                mock.patch.object(watch_repo, "get_repo_entries", commits), \
                 mock.patch.object(watch_repo, "process_repo_entries", process), \
                 mock.patch.object(watch_repo, "send_telegram", send), \
                 mock.patch.dict(os.environ, {"DM_METROS": '["SF Bay Area", "NYC"]'}):
@@ -272,6 +318,35 @@ class WatcherSilentFirstRun(StateDirTestCase):
         self.assertFalse(self.marker.exists())
         second = run()
         self.assertEqual([c.args[0] for c in second.call_args_list], [REPO])
+
+    def test_unsaved_commit_position_keeps_the_repo_in_rebuild_mode(self):
+        self.write_legacy_memory()
+        send, process = self.run_watcher([SENT, SIBLING], commits=mock.Mock(side_effect=RuntimeError("api down")))
+        send.assert_not_called()
+        self.assertFalse(state_utils.repo_rebuilt(self.state, REPO))
+        self.assertFalse(self.marker.exists())
+        self.assertFalse((self.state / f"last_seen_{REPO.replace('/', '_')}.txt").exists())
+        send, process = self.run_watcher([SENT, SIBLING], entries=[self.entry(SENT)])
+        process.assert_not_called()  # rebuilds again instead of replaying old commits
+        send.assert_not_called()
+        self.assertTrue(state_utils.repo_rebuilt(self.state, REPO))
+
+    def test_failed_memory_save_keeps_the_repo_in_rebuild_mode(self):
+        self.write_legacy_memory()
+        with failing_seen_save():
+            send, _ = self.run_watcher([SENT, SIBLING])
+        send.assert_not_called()
+        self.assertFalse(state_utils.repo_rebuilt(self.state, REPO))
+        self.assertFalse(self.marker.exists())
+        send, process = self.run_watcher([SENT, SIBLING], entries=[self.entry(SENT)])
+        process.assert_not_called()
+        send.assert_not_called()
+
+    def test_save_reports_whether_it_wrote(self):
+        self.assertTrue(state_utils.save_seen({"k": int(time.time())}, 14, str(self.seen_path)))
+        self.assertFalse(state_utils.save_seen({"k": int(time.time())}, 14, str(self.seen_path), dry_run=True))
+        with failing_seen_save():
+            self.assertFalse(state_utils.save_seen({"k": int(time.time())}, 14, str(self.seen_path)))
 
     def test_save_leaves_no_temp_file(self):
         state_utils.save_seen({"k": int(time.time())}, 14, str(self.seen_path))
