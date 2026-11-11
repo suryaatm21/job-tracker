@@ -9,6 +9,7 @@ and providing clear continuation headers.
 import atexit
 import json
 import os
+import re
 import time
 from collections import Counter
 from datetime import datetime, timezone
@@ -186,32 +187,33 @@ CONT_PREFIX = "(cont.)\n\n"
 
 def tg_len(text: str) -> int:
     """Length as Telegram counts it: UTF-16 code units, so an emoji outside the BMP counts 2."""
-    return len(text.encode("utf-16-le")) // 2
+    return len(text.encode("utf-16-le", "surrogatepass")) // 2
 
 
-def _split_line(line: str, max_units: int) -> List[str]:
+_HTML_TOKEN = re.compile(r"<(/?)([A-Za-z][A-Za-z0-9-]*)[^>]*>|&#?\w+;|.", re.S)
+
+
+def _truncate_line(line: str, max_units: int) -> str:
     """
-    Cut a line into pieces of at most max_units UTF-16 units, never inside a
-    surrogate pair. Each cut falls after the last space in the piece when there
-    is one, so words, URLs and HTML tags usually stay whole.
+    Shorten a line to at most max_units UTF-16 units, ending in an ellipsis.
+    Cuts fall outside HTML tags and entities, and tags still open at the cut are closed.
     """
-    pieces = []
-    while tg_len(line) > max_units:
-        cut, units = 0, 0
-        for ch in line:
-            width = 2 if ord(ch) > 0xFFFF else 1
-            if units + width > max_units:
-                break
-            cut += 1
-            units += width
-        cut = max(cut, 1)
-        space = line.rfind(" ", 0, cut)
-        if space > 0:
-            cut = space + 1
-        pieces.append(line[:cut])
-        line = line[cut:]
-    pieces.append(line)
-    return pieces
+    if tg_len(line) <= max_units:
+        return line
+    print(f"ERROR: Telegram line is {tg_len(line)} units; truncating to {max_units}")
+    out, used, open_tags = [], 0, []
+    for m in _HTML_TOKEN.finditer(line):
+        token, closing, name = m.group(0), m.group(1), m.group(2)
+        stack = open_tags
+        if name:
+            stack = open_tags[:-1] if closing and open_tags else open_tags + ([] if closing else [name])
+        reserve = 1 + sum(tg_len(f"</{t}>") for t in stack)
+        if used + tg_len(token) + reserve > max_units:
+            break
+        out.append(token)
+        used += tg_len(token)
+        open_tags = stack
+    return "".join(out) + "\u2026" + "".join(f"</{t}>" for t in reversed(open_tags))
 
 
 def safe_join_lines(header: str, lines: List[str], max_chars: int = 3900) -> List[str]:
@@ -219,8 +221,8 @@ def safe_join_lines(header: str, lines: List[str], max_chars: int = 3900) -> Lis
     Join lines into batches that fit within character limit, preserving whole lines.
 
     Lengths are counted in UTF-16 units, as Telegram counts them. A line that
-    cannot fit in one Telegram message even on its own is split into pieces;
-    every other line stays whole, even one longer than max_chars.
+    cannot fit in one Telegram message even on its own is truncated with an
+    ellipsis; every other line stays whole, even one longer than max_chars.
 
     Args:
         header: Header text for first batch
@@ -232,19 +234,13 @@ def safe_join_lines(header: str, lines: List[str], max_chars: int = 3900) -> Lis
     """
     max_chars = min(max_chars, TELEGRAM_LIMIT)
     if tg_len(header) > max_chars // 2:
-        print(f"ERROR: Telegram header is {tg_len(header)} units; truncating to {max_chars // 2}")
-        header = _split_line(header, max(max_chars // 2, 1))[0]
+        header = _truncate_line(header, max(max_chars // 2, 2))
     if not lines:
         return [header] if header else []
 
     # Room for a line alone in a batch under the longer of the two prefixes
     room = TELEGRAM_LIMIT - max(tg_len(header) + 2, tg_len(CONT_PREFIX))
-    fitted = []
-    for line in lines:
-        if tg_len(line) > room:
-            fitted.extend(_split_line(line, max(room, 1)))
-        else:
-            fitted.append(line)
+    fitted = [_truncate_line(line, max(room, 2)) for line in lines]
 
     batches = []
     current_batch = []

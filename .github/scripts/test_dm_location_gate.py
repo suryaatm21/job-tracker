@@ -157,6 +157,25 @@ class DmStateLabelTest(unittest.TestCase):
         self.assertEqual(format_location(["Chicago, IL", "Nanjing, China"], "dm"), "Multi-location")
 
 
+class OversizedLineTest(unittest.TestCase):
+    def test_html_line_is_truncated_outside_tags_with_tags_closed(self):
+        import telegram_utils
+        line = "• <b>Acme</b> — " + "<i>" + "word " * 1200 + "</i>"
+        with contextlib.redirect_stdout(io.StringIO()) as out:
+            batches = telegram_utils.safe_join_lines("Header", ["first", line, "last"])
+        self.assertIn("ERROR", out.getvalue())
+        body = "\n".join(batches).split("\n")
+        self.assertTrue(all(telegram_utils.tg_len(b) <= telegram_utils.TELEGRAM_LIMIT for b in batches))
+        cut = next(l for l in body if l.startswith("• <b>Acme</b>"))
+        self.assertTrue(cut.endswith("\u2026</i>"))
+        self.assertEqual(cut.count("<i>"), cut.count("</i>"))
+        self.assertIn("last", body)
+
+    def test_lone_surrogate_does_not_raise(self):
+        import telegram_utils
+        self.assertEqual(telegram_utils.tg_len("a\ud83db"), 3)
+
+
 class OversizedHeaderTest(unittest.TestCase):
     def test_header_is_truncated_and_every_batch_fits(self):
         import telegram_utils
