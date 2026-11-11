@@ -16,8 +16,8 @@ The rules the bot must follow, in plain words. Every rule has an id, and the tes
 ## Duplicate removal (`dedup_utils`)
 
 - **DEDUP-1** The key ignores letter case in the scheme and host, a trailing slash, and the `#fragment`. Letter case in the path is undecided.
-- **DEDUP-2** Two listings share a key only if they are the same posting: query parameters that identify a posting (`?gh_jid=...`) count. The reference is `send_private_digest.canonical_url_key`. Known bug: the key drops the whole query, so distinct postings on one careers page merge into one.
-- **DEDUP-3** The digest dedup and the "already posted" memory turn a URL into a key the same way. Known bug: the two `normalize_url` copies disagree on blank input (`" "` gives `":"` in one and `None` in the other).
+- **DEDUP-2** Two listings share a key only if they are the same posting: query parameters that identify a posting (`?gh_jid=...`) count. The reference is `send_private_digest.canonical_url_key`.
+- **DEDUP-3** The digest dedup and the "already posted" memory turn a URL into a key the same way.
 - **DEDUP-4** The key is the normalized URL first, then the listing `id`, then (company, title) in lower case. The memory uses the same order.
 
 ## The "already posted" memory (`state_utils`)
@@ -26,7 +26,7 @@ The rules the bot must follow, in plain words. Every rule has an id, and the tes
 - **SEEN-2** Once a listing would alert at some time, it would alert at every later time.
 - **SEEN-3** An update counts as a reopen only if it comes at least 1 day (86400 seconds) after the last alert. Updates inside that day fall back to the TTL rule.
 - **SEEN-4** A listing with no URL, no id and no company-plus-title never alerts.
-- **SEEN-5** Good values in `seen.json` load as whole seconds, and one bad value drops only its own entry. Known bug: one bad value wipes the whole memory, so every listing alerts again.
+- **SEEN-5** Good values in `seen.json` load as whole seconds, and one bad value drops only its own entry.
 
 ## DM location labels (`format_utils.format_location`)
 

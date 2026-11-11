@@ -55,7 +55,6 @@ def test_seen_4_listing_without_any_key_never_alerts(item, now):
     assert state_utils.should_alert_item(item, {}, 14 * DAY, now) == (False, "no_cache_key")
 
 
-@pytest.mark.xfail(strict=True, raises=AssertionError, reason="SEEN-5")
 def test_seen_5_one_bad_value_does_not_wipe_the_memory(tmp_path):
     p = tmp_path / "seen.json"
     p.write_text('{"https://a.com/1": 1700000000, "https://b.com/2": "not-a-number"}')

@@ -38,7 +38,6 @@ def test_dedup_1_key_ignores_trailing_slash_fragment_and_host_case(parts):
         assert dedup_utils.normalize_url(build_url(scheme, host, path, query, "", True)) == key
 
 
-@pytest.mark.xfail(strict=True, raises=AssertionError, reason="DEDUP-2")
 @settings(max_examples=500)
 @given(a=urls, b=urls)
 @example(a="http://jobs.lever.co/0000", b="http://jobs.lever.co/0000?gh_jid=1")
@@ -50,7 +49,6 @@ def test_dedup_2_merges_only_postings_the_reference_key_also_merges(a, b):
         assert ref(a.lower()) == ref(b.lower()), (a, b)
 
 
-@pytest.mark.xfail(strict=True, raises=AssertionError, reason="DEDUP-3")
 @settings(max_examples=2000)
 @given(st.one_of(urls, st.text(max_size=30)))
 @example(" ")
