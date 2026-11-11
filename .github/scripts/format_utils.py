@@ -3,6 +3,43 @@
 Formatting utilities for job listing display.
 Includes location formatting logic for different notification modes.
 """
+import json
+import os
+import re
+from functools import lru_cache
+
+# Metro city lists live in the private digest config. A metro's cities count for a
+# state through its state_tokens: "ca" -> SF Bay Area and Los Angeles, "ny" -> NYC.
+_METRO_CONFIG = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "private_channel", "config.json")
+# DM label -> state code first, then names. Checked in this order.
+_STATE_TERMS = {
+    "California": ("ca", "california"),
+    "New York": ("ny", "new york", "nyc", "new york city"),
+    "New Jersey": ("nj", "new jersey"),
+}
+
+
+def _word_pattern(terms):
+    """Match any of terms as whole words, so "ca" never matches inside "Chicago"."""
+    alternation = "|".join(re.escape(t) for t in sorted(set(terms), key=len, reverse=True))
+    return re.compile(r"(?<![a-z])(?:" + alternation + r")(?![a-z])")
+
+
+@lru_cache(maxsize=1)
+def _state_patterns():
+    """(label, pattern) per state: its code, names, and the metro cities that need no state."""
+    try:
+        with open(_METRO_CONFIG, encoding="utf-8") as f:
+            metros = json.load(f).get("location", {}).get("metros", [])
+    except (OSError, ValueError):
+        metros = []
+    patterns = []
+    for label, terms in _STATE_TERMS.items():
+        cities = [c.lower() for m in metros if terms[0] in m.get("state_tokens", [])
+                  for c in m.get("cities", [])]
+        patterns.append((label, _word_pattern(list(terms) + cities)))
+    return patterns
+
 
 def format_location(locations, mode="digest"):
     """
@@ -40,26 +77,12 @@ def format_location(locations, mode="digest"):
         return "Multi-location"
     
     elif mode == "dm":
-        # Check for CA/California first
-        for loc in valid_locations:
-            loc_lower = loc.lower()
-            if "ca" in loc_lower or "california" in loc_lower:
-                return "California"
-        
-        # Check for New York (avoid substring false-positives like 'Albany')
-        import re
-        for loc in valid_locations:
-            loc_lower = loc.lower()
-            if ("new york city" in loc_lower or "new york" in loc_lower or "nyc" in loc_lower or
-                re.search(r"(^|[\s,(/-])ny(\b|[)\s,-])", loc_lower)):
-                return "New York"
-        
-        # Check for NJ/New Jersey
-        for loc in valid_locations:
-            loc_lower = loc.lower()
-            if "nj" in loc_lower or "new jersey" in loc_lower:
-                return "New Jersey"
-        
+        # California, then New York, then New Jersey: whole words only, so
+        # Chicago is not "ca" and Nanjing is not "nj"
+        for label, pattern in _state_patterns():
+            if any(pattern.search(loc.lower()) for loc in valid_locations):
+                return label
+
         # Default for multi-location in DM mode
         return "Multi-location"
     

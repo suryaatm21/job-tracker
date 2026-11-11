@@ -180,28 +180,76 @@ def send_message(token: str, chat_id: str, text: str, parse_mode: Optional[str] 
     log_sent(text, ok, message_id=message_id, error=error, chat_label=chat_label, secrets=secrets)
     return ok, status, body
 
+TELEGRAM_LIMIT = 4096  # sendMessage text limit, counted in UTF-16 code units
+CONT_PREFIX = "(cont.)\n\n"
+
+
+def tg_len(text: str) -> int:
+    """Length as Telegram counts it: UTF-16 code units, so an emoji outside the BMP counts 2."""
+    return len(text.encode("utf-16-le")) // 2
+
+
+def _split_line(line: str, max_units: int) -> List[str]:
+    """
+    Cut a line into pieces of at most max_units UTF-16 units, never inside a
+    surrogate pair. Each cut falls after the last space in the piece when there
+    is one, so words, URLs and HTML tags usually stay whole.
+    """
+    pieces = []
+    while tg_len(line) > max_units:
+        cut, units = 0, 0
+        for ch in line:
+            width = 2 if ord(ch) > 0xFFFF else 1
+            if units + width > max_units:
+                break
+            cut += 1
+            units += width
+        cut = max(cut, 1)
+        space = line.rfind(" ", 0, cut)
+        if space > 0:
+            cut = space + 1
+        pieces.append(line[:cut])
+        line = line[cut:]
+    pieces.append(line)
+    return pieces
+
+
 def safe_join_lines(header: str, lines: List[str], max_chars: int = 3900) -> List[str]:
     """
     Join lines into batches that fit within character limit, preserving whole lines.
-    
+
+    Lengths are counted in UTF-16 units, as Telegram counts them. A line that
+    cannot fit in one Telegram message even on its own is split into pieces;
+    every other line stays whole, even one longer than max_chars.
+
     Args:
         header: Header text for first batch
         lines: List of content lines to batch
-        max_chars: Maximum characters per batch
-    
+        max_chars: Maximum characters per batch (capped at TELEGRAM_LIMIT)
+
     Returns:
         list[str]: List of message batches ready to send
     """
     if not lines:
         return [header] if header else []
-    
+
+    max_chars = min(max_chars, TELEGRAM_LIMIT)
+    # Room for a line alone in a batch under the longer of the two prefixes
+    room = TELEGRAM_LIMIT - max(tg_len(header) + 2, tg_len(CONT_PREFIX))
+    fitted = []
+    for line in lines:
+        if tg_len(line) > room:
+            fitted.extend(_split_line(line, max(room, 1)))
+        else:
+            fitted.append(line)
+
     batches = []
     current_batch = []
-    current_length = len(header)
-    
-    for line in lines:
-        line_length = len(line) + 1  # +1 for newline
-        
+    current_length = tg_len(header) + 1  # header + "\n\n", less the first line's newline
+
+    for line in fitted:
+        line_length = tg_len(line) + 1  # +1 for newline
+
         # If adding this line would exceed limit, start new batch
         if current_batch and current_length + line_length > max_chars:
             # Finish current batch
@@ -305,7 +353,7 @@ def send_telegram_with_batching(text: str, parse_mode: Optional[str] = None) -> 
         return False
     
     # If message is short enough, send as single message
-    if len(text) <= 4000:
+    if tg_len(text) <= 4000:
         success, status, body = send_message(token, chat_id, text, parse_mode)
         if not success:
             print(f"Telegram send failed: {status} - {body}")
