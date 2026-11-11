@@ -3,7 +3,6 @@ import pytest
 from hypothesis import example, given, settings, strategies as st
 
 import dedup_utils
-import send_private_digest
 import state_utils
 
 SCHEMES = ["http", "https", "HTTPS"]
@@ -38,15 +37,25 @@ def test_dedup_1_key_ignores_trailing_slash_fragment_and_host_case(parts):
         assert dedup_utils.normalize_url(build_url(scheme, host, path, query, "", True)) == key
 
 
+def reference_key(url):
+    """Independent rule: lowercase scheme and host, path without one trailing slash, no fragment,
+    query kept except utm_* tracking parameters."""
+    url = url.lower().split("#")[0]
+    base, _, query = url.partition("?")
+    scheme, _, rest = base.partition("://")
+    host, _, path = rest.partition("/")
+    params = sorted(q for q in query.split("&") if q and not q.startswith("utm_"))
+    return scheme, host, path.rstrip("/") if path.endswith("/") and not path.endswith("//") else path, params
+
+
 @settings(max_examples=500)
 @given(a=urls, b=urls)
 @example(a="http://jobs.lever.co/0000", b="http://jobs.lever.co/0000?gh_jid=1")
 def test_dedup_2_merges_only_postings_the_reference_key_also_merges(a, b):
-    """Reference: the private digest's normalize_url keeps identifying query params.
+    """Reference: reference_key above keeps identifying query params.
     Inputs are lowercased for the reference so path case (undecided, see SPEC.md) plays no part."""
     if dedup_utils.normalize_url(a) == dedup_utils.normalize_url(b):
-        ref = send_private_digest.normalize_url
-        assert ref(a.lower()) == ref(b.lower()), (a, b)
+        assert reference_key(a) == reference_key(b), (a, b)
 
 
 @settings(max_examples=2000)

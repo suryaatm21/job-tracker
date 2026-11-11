@@ -1,13 +1,13 @@
 diff --git a/.github/scripts/dedup_utils.py b/.github/scripts/dedup_utils.py
-index a84421d..2cdac6c 100644
+index 794b6d6..4b88af5 100644
 --- a/.github/scripts/dedup_utils.py
 +++ b/.github/scripts/dedup_utils.py
-@@ -34,7 +34,7 @@ def normalize_url(url):
-     except ValueError:
-         return None
+@@ -36,7 +36,7 @@ def normalize_url(url):
      path = parts.path.rstrip("/")
+     if not parts.netloc and not path:
+         return None
 -    key = f"{parts.scheme.lower()}://{parts.netloc.lower()}{path}"
 +    key = f"{parts.scheme.lower()}://{parts.netloc}{path}"
-     if key == "://":
-         return None
      return f"{key}?{urlencode(query)}" if query else key
+ 
+ 
