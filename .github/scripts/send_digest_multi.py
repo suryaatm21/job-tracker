@@ -216,7 +216,7 @@ def main():
     debug_log(f"[WINDOW] Time cutoff: {cutoff_time.isoformat()} ({cutoff_epoch})")
     
     all_items = []
-    empty_repos = []
+    failed_repos = []
     
     # Process each repository
     for repo in TARGET_REPOS:
@@ -227,7 +227,6 @@ def main():
             listings = get_listings(repo)
             if not listings:
                 debug_log(f"[REPO] {repo} → No listings found")
-                empty_repos.append(repo)
                 continue
             
             debug_log(f"[REPO] {repo} → {len(listings)} total items")
@@ -257,7 +256,7 @@ def main():
             
         except Exception as e:
             debug_log(f"[REPO] {repo} → Error: {e}")
-            empty_repos.append(repo)
+            failed_repos.append(repo)
             continue
     
     debug_log(f"[AGGREGATE] Total items from all repos: {len(all_items)}")
@@ -265,9 +264,9 @@ def main():
     if seen_needs_rebuild(seen, str(seen_cache_path)):
         # Memory saved under older keys would not match today's keys, so every listing
         # in the window would post again. Record them all as seen and send nothing.
-        if empty_repos:
+        if failed_repos:
             # A partial rebuild would let the missing repo's listings post again next run
-            debug_log(f"[REBUILD] No listings from {empty_repos}; retrying the rebuild next run, sending nothing")
+            debug_log(f"[REBUILD] Could not fetch {failed_repos}; retrying the rebuild next run, sending nothing")
             return True
         added = rebuild_seen(seen, all_items, now_epoch)
         debug_log(f"[REBUILD] Seen cache holds older keys: marked {added} keys from "

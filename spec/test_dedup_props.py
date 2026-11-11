@@ -42,10 +42,10 @@ def test_dedup_1_key_ignores_trailing_slash_fragment_and_host_case(parts):
 @given(a=urls, b=urls)
 @example(a="http://jobs.lever.co/0000", b="http://jobs.lever.co/0000?gh_jid=1")
 def test_dedup_2_merges_only_postings_the_reference_key_also_merges(a, b):
-    """Reference: the private digest's canonical_url_key keeps identifying query params.
+    """Reference: the private digest's normalize_url keeps identifying query params.
     Inputs are lowercased for the reference so path case (undecided, see SPEC.md) plays no part."""
     if dedup_utils.normalize_url(a) == dedup_utils.normalize_url(b):
-        ref = send_private_digest.canonical_url_key
+        ref = send_private_digest.normalize_url
         assert ref(a.lower()) == ref(b.lower()), (a, b)
 
 

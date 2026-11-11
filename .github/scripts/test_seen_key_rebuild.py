@@ -99,7 +99,7 @@ class DigestSilentFirstRun(StateDirTestCase):
         with mock.patch.object(send_digest_multi, "STATE_DIR", self.state), \
                 mock.patch.object(send_digest_multi, "DRY_RUN", dry_run), \
                 mock.patch.object(send_digest_multi, "TARGET_REPOS", [REPO]), \
-                mock.patch.object(send_digest_multi, "get_listings", return_value=listings), \
+                mock.patch.object(send_digest_multi, "get_listings", **({"side_effect": listings} if isinstance(listings, Exception) else {"return_value": listings})), \
                 mock.patch.object(send_digest_multi, "batch_send_message", send), \
                 mock.patch.dict(os.environ, {"TELEGRAM_BOT_TOKEN": "t", "TELEGRAM_CHAT_ID": "c"}):
             self.assertTrue(send_digest_multi.main())
@@ -133,10 +133,16 @@ class DigestSilentFirstRun(StateDirTestCase):
     def test_rebuild_with_a_failed_repo_saves_nothing(self):
         self.write_legacy_memory()
         before = self.seen_path.read_text()
-        send = self.run_digest([])
+        send = self.run_digest(RuntimeError("fetch failed"))
         send.assert_not_called()
         self.assertEqual(self.seen_path.read_text(), before)
         self.assertFalse(self.marker.exists())
+
+    def test_rebuild_with_an_empty_repo_completes(self):
+        self.write_legacy_memory()
+        send = self.run_digest([])
+        send.assert_not_called()
+        self.assertEqual(self.marker.read_text().strip(), str(state_utils.SEEN_KEY_VERSION))
 
     def test_dry_run_rebuild_writes_nothing(self):
         self.write_legacy_memory()

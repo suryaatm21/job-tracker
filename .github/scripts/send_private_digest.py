@@ -39,7 +39,7 @@ import requests
 
 from github_helper import debug_log, fetch_file_content, fetch_file_json, gh_get, GH
 from repo_utils import get_default_branch, fetch_listings, DEFAULT_LISTINGS_PATH
-from dedup_utils import get_primary_url, normalize_url as canonical_url_key
+from dedup_utils import get_primary_url, normalize_url
 from state_utils import (load_seen, save_seen, get_cache_key,
                          should_include_item, parse_epoch)
 from telegram_utils import batch_send_message, is_dry_run, safe_join_lines, send_message
@@ -252,7 +252,7 @@ def listing_keys(item):
     company+title).
     """
     company, title = normalize_company(item.get("company_name")), _title_key(item)
-    url_key = canonical_url_key(get_primary_url(item)) or get_cache_key(item)
+    url_key = normalize_url(get_primary_url(item)) or get_cache_key(item)
     level = item.get("_level") or ""
     metro_keys = [f"ct:{company}|{title}|{level}|{metro}" for metro in item.get("_metros") or []]
     return ([url_key] if url_key else []), metro_keys
