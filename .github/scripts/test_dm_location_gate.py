@@ -5,6 +5,8 @@ DM location gate tests: DM alerts keep only listings in the DM metros
 
 Run: python -m unittest discover -s .github/scripts -p 'test_dm_location_gate.py'
 """
+import contextlib
+import io
 import json
 import os
 import pathlib
@@ -108,6 +110,13 @@ class DmLocationGate(unittest.TestCase):
         self.assertEqual(line, "[LOCATION] dropped location:elsewhere=3 location:remote_only=1 location:unknown=1")
         for item in self.items.values():
             self.assertNotIn(item["company_name"], line)
+
+    def test_drop_log_is_visible_at_default_log_level(self):
+        _, drops = run_watcher(list(self.items.values()), self.gate)
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out):
+            watch_repo.log_location_drops(drops)
+        self.assertIn("[LOCATION] dropped location:elsewhere=3", out.getvalue())
 
     def test_without_gate_watcher_is_unfiltered(self):
         entries, drops = run_watcher(list(self.items.values()), None)

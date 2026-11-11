@@ -40,6 +40,7 @@ _PREFIX_LEVELS = {
     "[LIMIT]": "INFO",
     "[DIGEST]": "INFO",
     "[BATCH]": "INFO",
+    "[LOCATION]": "INFO",
 }
 
 _LOG_LEVEL_NAME = os.getenv("WATCHER_LOG_LEVEL", "INFO").upper()
