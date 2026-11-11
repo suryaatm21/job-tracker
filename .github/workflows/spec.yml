@@ -38,5 +38,11 @@ jobs:
       - uses: actions/setup-python@v7
         with: { python-version: '3.12' }
       - run: pip install -r requirements-dev.txt
+      - name: Unknown mutant ids are rejected
+        run: |
+          if bash spec/run_mutants.sh M0-no-such-mutant; then
+            echo "run_mutants.sh accepted an id that is not in the manifest" >&2
+            exit 1
+          fi
       - name: Every planted bug must be caught
         run: bash spec/run_mutants.sh

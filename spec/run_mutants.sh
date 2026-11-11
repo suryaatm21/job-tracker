@@ -56,6 +56,22 @@ wanted() {
   return 1
 }
 
+# Every requested id must be in the manifest, so a typo can never report success.
+manifest_ids() {
+  while read -r status patch _desc; do
+    case "$status" in ''|'#'*) continue ;; esac
+    echo "${patch%%_*}"
+  done < "$MANIFEST"
+}
+unknown=""
+for w in "$@"; do
+  manifest_ids | grep -qx -- "$w" || unknown="$unknown $w"
+done
+if [ -n "$unknown" ]; then
+  echo "ERROR: unknown mutant id(s):$unknown. Known ids:" $(manifest_ids) >&2
+  exit 2
+fi
+
 baseline=$(run_checks "$LOGS/baseline.log")
 if [ "$baseline" != pass ]; then
   echo "ERROR: the checks do not pass on unchanged code ($baseline); mutants would prove nothing." >&2

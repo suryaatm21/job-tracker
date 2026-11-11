@@ -11,3 +11,5 @@ active  M6_hardware_label_in_dm_map.patch    Hardware label maps to a DM categor
 active  M7_hardware_in_dm_allowed_set.patch  Hardware Engineering added to the code's DM set (ROUTE-1)
 active  M8_dedup_keeps_trailing_slash.patch  dedup key keeps a trailing slash (DEDUP-1)
 active  M9_dedup_case_sensitive.patch        dedup key keeps host letter case (DEDUP-1)
+active  M10_drop_new_york_label.patch        DM never says New York (LOC-1)
+active  M11_drop_new_jersey_label.patch      DM never says New Jersey (LOC-1)

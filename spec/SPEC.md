@@ -30,7 +30,7 @@ The rules the bot must follow, in plain words. Every rule has an id, and the tes
 
 ## DM location labels (`format_utils.format_location`)
 
-- **LOC-1** A multi-location DM says "California" exactly when one of its locations is in California. The same rule holds for "New York" and "New Jersey". Known bug: the code matches the letters "ca" anywhere, so Chicago, Canada and Lancaster read as California.
+- **LOC-1** A multi-location DM says "California" exactly when one of its locations is in California. Otherwise it says "New York" exactly when one is in New York, and otherwise "New Jersey" exactly when one is in New Jersey. Known bugs: the code matches the letters "ca" and "nj" anywhere, so Chicago, Canada and Lancaster read as California, and Nanjing and Tianjin read as New Jersey.
 - **LOC-2** A single location is shown as given; several locations in a digest show as "Multi-location".
 
 ## Time windows (`state_utils.parse_epoch`, `send_digest_multi.parse_dt`)

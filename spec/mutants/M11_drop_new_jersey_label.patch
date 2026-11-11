@@ -1,0 +1,13 @@
+diff --git a/.github/scripts/format_utils.py b/.github/scripts/format_utils.py
+index 3d7a077..e97f9bb 100644
+--- a/.github/scripts/format_utils.py
++++ b/.github/scripts/format_utils.py
+@@ -58,7 +58,7 @@ def format_location(locations, mode="digest"):
+         for loc in valid_locations:
+             loc_lower = loc.lower()
+             if "nj" in loc_lower or "new jersey" in loc_lower:
+-                return "New Jersey"
++                pass
+         
+         # Default for multi-location in DM mode
+         return "Multi-location"
