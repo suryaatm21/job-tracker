@@ -161,8 +161,22 @@ class StateCodeTest(unittest.TestCase):
     def test_code_after_last_comma_decides(self):
         from format_utils import format_location
         self.assertEqual(format_location(["San Diego, CA", "Seattle, WA"], "dm"), "California")
+        self.assertEqual(format_location(["New York Mills, MN, USA", "Seattle, WA"], "dm"), "Multi-location")
+        self.assertEqual(format_location(["San Jose, CA, US", "Seattle, WA"], "dm"), "California")
         self.assertEqual(format_location(["New York, NY", "Seattle, WA"], "dm"), "New York")
         self.assertEqual(format_location(["New York, United States", "Seattle, WA"], "dm"), "New York")
+
+
+class WatchRepoEmojiTest(unittest.TestCase):
+    def test_emoji_heavy_alert_is_batched_not_sent_whole(self):
+        import watch_repo, telegram_utils
+        text = "\U0001F600" * 2100
+        with mock.patch.dict(os.environ, {"TELEGRAM_BOT_TOKEN": "t", "TELEGRAM_CHAT_ID": "c"}), \
+                mock.patch.object(watch_repo, "send_message") as single, \
+                mock.patch.object(watch_repo, "batch_send_message", return_value=(True, [])) as batch:
+            watch_repo.send_telegram(text)
+        single.assert_not_called()
+        batch.assert_called_once()
 
 
 class OversizedLineTest(unittest.TestCase):
