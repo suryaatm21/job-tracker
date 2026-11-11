@@ -22,7 +22,8 @@ from datetime import datetime, timezone, timedelta
 
 # Utility imports
 from github_helper import debug_log
-from state_utils import load_seen, save_seen, should_alert_item, get_cache_key, format_epoch_for_log, should_include_item
+from state_utils import (load_seen, save_seen, should_alert_item, get_cache_key, format_epoch_for_log,
+                         should_include_item, seen_needs_rebuild, rebuild_seen)
 from format_utils import format_location, log_location_resolution, format_job_line
 from telegram_utils import batch_send_message, is_dry_run
 from repo_utils import fetch_listings
@@ -215,6 +216,7 @@ def main():
     debug_log(f"[WINDOW] Time cutoff: {cutoff_time.isoformat()} ({cutoff_epoch})")
     
     all_items = []
+    empty_repos = []
     
     # Process each repository
     for repo in TARGET_REPOS:
@@ -225,6 +227,7 @@ def main():
             listings = get_listings(repo)
             if not listings:
                 debug_log(f"[REPO] {repo} → No listings found")
+                empty_repos.append(repo)
                 continue
             
             debug_log(f"[REPO] {repo} → {len(listings)} total items")
@@ -254,9 +257,23 @@ def main():
             
         except Exception as e:
             debug_log(f"[REPO] {repo} → Error: {e}")
+            empty_repos.append(repo)
             continue
     
     debug_log(f"[AGGREGATE] Total items from all repos: {len(all_items)}")
+
+    if seen_needs_rebuild(seen, str(seen_cache_path)):
+        # Memory saved under older keys would not match today's keys, so every listing
+        # in the window would post again. Record them all as seen and send nothing.
+        if empty_repos:
+            # A partial rebuild would let the missing repo's listings post again next run
+            debug_log(f"[REBUILD] No listings from {empty_repos}; retrying the rebuild next run, sending nothing")
+            return True
+        added = rebuild_seen(seen, all_items, now_epoch)
+        debug_log(f"[REBUILD] Seen cache holds older keys: marked {added} keys from "
+                  f"{len(all_items)} in-window items as seen; sending nothing this run")
+        save_seen(seen, SEEN_TTL_DAYS, str(seen_cache_path), dry_run=DRY_RUN)
+        return True
     
     # Deduplication by URL/ID
     seen_keys = set()

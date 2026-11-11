@@ -9,26 +9,10 @@ import json
 import pathlib
 import time
 from datetime import datetime, timezone
-from urllib.parse import urlparse
+from dedup_utils import get_primary_url, normalize_url
 
 # Reopen detection grace period - prevents identical re-additions from bypassing TTL
 REOPEN_GRACE_PERIOD = 86400  # 1 day in seconds
-
-def get_primary_url(item):
-    """Return the canonical URL for a listing (url or application_link)."""
-    return (item.get("url") or item.get("application_link") or "").strip()
-
-def normalize_url(url):
-    """Normalize URL to scheme+host+path for consistent caching"""
-    if not url or not url.strip():
-        return None
-    try:
-        parsed = urlparse(url.strip().lower())
-        # Keep scheme, netloc (host), and path; drop query and fragment
-        normalized = f"{parsed.scheme}://{parsed.netloc}{parsed.path}".rstrip('/')
-        return normalized if normalized != "://" else None
-    except Exception:
-        return None
 
 def get_cache_key(item):
     """Get consistent cache key: normalized_url -> id -> (company.lower(), title.lower())"""
@@ -81,28 +65,91 @@ def should_include_item(item):
     url = get_primary_url(item)
     return bool(url)
 
+# Version of the keys seen.json holds, stored next to it in seen_key_version.
+# Bump it whenever get_cache_key changes, so the first run on new keys rebuilds the
+# memory silently instead of posting every listing again (see rebuild_seen).
+# 2: URL keys keep identifying query parameters (?gh_jid=...) and path case.
+SEEN_KEY_VERSION = 2
+
+
+def key_version_path(path):
+    """Path of the key-version marker for the seen cache at path."""
+    return pathlib.Path(path).with_name("seen_key_version")
+
+
 def load_seen(path=".state/seen.json"):
     """
     Load seen cache from JSON file.
-    
+
+    An entry whose value is not a number is skipped and logged; it never costs
+    the rest of the memory (SPEC.md, SEEN-5).
+
     Returns:
         dict[str, int]: Mapping of cache_key -> last_alert_epoch
     """
     try:
         seen_path = pathlib.Path(path)
-        if seen_path.exists():
-            with open(seen_path, 'r', encoding='utf-8') as f:
-                data = json.load(f)
-                # Ensure all values are integers (epoch seconds)
-                return {k: int(v) for k, v in data.items() if isinstance(v, (int, float, str))}
-        return {}
+        if not seen_path.exists():
+            return {}
+        with open(seen_path, 'r', encoding='utf-8') as f:
+            data = json.load(f)
     except Exception as e:
         print(f"Warning: Failed to load seen cache from {path}: {e}")
         return {}
+    if not isinstance(data, dict):
+        print(f"Warning: Seen cache at {path} is not a JSON object; starting empty")
+        return {}
+
+    seen, bad = {}, []
+    for key, value in data.items():
+        try:
+            if isinstance(value, bool):
+                raise TypeError("boolean")
+            seen[key] = int(float(value))
+        except (TypeError, ValueError, OverflowError):
+            bad.append(key)
+    if bad:
+        print(f"Warning: Skipped {len(bad)} seen cache entries with non-numeric values in {path} "
+              f"(e.g. {bad[:3]})")
+    return seen
+
+
+def seen_needs_rebuild(seen, path=".state/seen.json"):
+    """
+    True when seen holds entries saved under older keys: the memory is not empty
+    and its key-version marker is missing or older than SEEN_KEY_VERSION. Empty
+    memory needs no rebuild, because nothing in it could be posted twice.
+    """
+    if not seen:
+        return False
+    try:
+        return int(key_version_path(path).read_text(encoding="utf-8").strip()) < SEEN_KEY_VERSION
+    except (OSError, ValueError):
+        return True
+
+
+def rebuild_seen(seen, items, now_epoch):
+    """
+    Silent first run on new keys: record every item's current key as seen at
+    now_epoch. A key that is already in the memory keeps its time. The caller
+    sends nothing and saves the memory, which also writes the new key version.
+
+    Returns:
+        int: number of keys added
+    """
+    added = 0
+    for item in items:
+        key = get_cache_key(item)
+        if key and key not in seen:
+            seen[key] = now_epoch
+            added += 1
+    return added
+
 
 def save_seen(seen, ttl_days, path=".state/seen.json", max_entries=200000, dry_run=False):
     """
-    Save seen cache to JSON file with TTL-based pruning.
+    Save seen cache to JSON file with TTL-based pruning, and mark it as holding
+    SEEN_KEY_VERSION keys.
     
     Args:
         seen: dict[str, int] mapping cache_key -> last_alert_epoch
@@ -136,6 +183,8 @@ def save_seen(seen, ttl_days, path=".state/seen.json", max_entries=200000, dry_r
         # Save to file
         with open(seen_path, 'w', encoding='utf-8') as f:
             json.dump(pruned_seen, f, indent=2)
+        # Written after the memory, so a failed save leaves the old version in place
+        key_version_path(seen_path).write_text(f"{SEEN_KEY_VERSION}\n", encoding="utf-8")
         
         pruned_count = len(seen) - len(pruned_seen)
         if pruned_count > 0:

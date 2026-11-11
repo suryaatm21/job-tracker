@@ -34,13 +34,12 @@ import re
 import sys
 import time
 from collections import defaultdict
-from urllib.parse import parse_qsl, urlencode, urlsplit
 
 import requests
 
 from github_helper import debug_log, fetch_file_content, fetch_file_json, gh_get, GH
 from repo_utils import get_default_branch, fetch_listings, DEFAULT_LISTINGS_PATH
-from dedup_utils import get_primary_url
+from dedup_utils import get_primary_url, normalize_url as canonical_url_key
 from state_utils import (load_seen, save_seen, get_cache_key,
                          should_include_item, parse_epoch)
 from telegram_utils import batch_send_message, is_dry_run, safe_join_lines, send_message
@@ -243,32 +242,6 @@ def listing_epoch(item):
 
 def _title_key(item):
     return re.sub(r"[^a-z0-9]+", " ", (item.get("title") or "").lower()).strip()
-
-
-# Query parameters that only track where a click came from. Everything else in a
-# query string is kept, because some boards identify the posting there
-# (careers.withwaymo.com/jobs?gh_jid=8350687).
-_TRACKING_PARAMS = {
-    "ref", "ref_src", "referrer", "source", "src", "gh_src", "lever-source", "lever-origin",
-    "trk", "fbclid", "gclid", "mc_cid", "mc_eid", "_hsenc", "_hsmi",
-}
-
-
-def canonical_url_key(url):
-    """
-    Dedup key for an application link: lowercase scheme and host, path without a
-    trailing slash, and the query minus tracking parameters (utm_* and
-    _TRACKING_PARAMS), sorted. The fragment is dropped. Returns None for no URL.
-    """
-    url = (url or "").strip()
-    if not url:
-        return None
-    parts = urlsplit(url)
-    query = sorted((k, v) for k, v in parse_qsl(parts.query, keep_blank_values=True)
-                   if not (k.lower().startswith("utm_") or k.lower() in _TRACKING_PARAMS))
-    path = parts.path.rstrip("/")
-    key = f"{parts.scheme.lower()}://{parts.netloc.lower()}{path}"
-    return f"{key}?{urlencode(query)}" if query else key
 
 
 def listing_keys(item):

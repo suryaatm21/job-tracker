@@ -26,12 +26,12 @@ from github_helper import debug_log
 from state_utils import (
     load_seen, save_seen, should_alert_item, 
     get_cache_key, format_epoch_for_log, should_include_item,
-    parse_epoch, get_primary_url
+    parse_epoch, get_primary_url, seen_needs_rebuild, rebuild_seen
 )
 from format_utils import format_location, log_location_resolution, format_job_line
 from telegram_utils import send_message, batch_send_message, is_dry_run, tg_len
-from repo_utils import resolve_listings_source, get_repo_entries
-from dedup_utils import get_dedup_key, get_unified_season
+from repo_utils import resolve_listings_source, get_repo_entries, fetch_listings
+from dedup_utils import get_dedup_key, get_unified_season, to_epoch
 from job_filtering import should_process_repo_item
 from watcher_core import process_repo_entries
 from opportunity_filters import metro_subset_matcher, LOCATION_ELSEWHERE, LOCATION_REMOTE, LOCATION_UNKNOWN
@@ -155,6 +155,15 @@ def log_location_drops(drop_counts):
     debug_log("[LOCATION] dropped " + " ".join(f"{r}={drop_counts[r]}" for r in reasons))
 
 
+def window_listings(repo, now_epoch):
+    """The repo's current listings dated within WINDOW_HOURS (the watcher's own window test)."""
+    cutoff = now_epoch - WINDOW_HOURS * 3600.0
+    listings = fetch_listings(repo, LISTINGS_PATH)
+    if not isinstance(listings, list):
+        raise ValueError(f"expected a list of listings, got {type(listings).__name__}")
+    return [x for x in listings if to_epoch(x.get(DATE_FIELD, x.get(DATE_FALLBACK))) >= cutoff]
+
+
 def main():
     location_gate = build_location_gate(os.getenv("DM_METROS"))
     location_drops = Counter()
@@ -173,6 +182,13 @@ def main():
     seen = load_seen(str(seen_cache_path))
     ttl_seconds = SEEN_TTL_DAYS * 24 * 3600
     now_epoch = int(time.time())
+
+    # Memory saved under older keys would not match today's keys, so listings already
+    # sent could alert again. This run records every in-window listing as seen and sends nothing.
+    rebuilding = seen_needs_rebuild(seen, str(seen_cache_path))
+    rebuild_failed = []
+    if rebuilding:
+        debug_log("[REBUILD] Seen cache holds older keys: silent run, nothing will be sent")
     
     all_entries = []
     
@@ -204,17 +220,27 @@ def main():
         debug_log(f"[STATE] {repo} last_seen_SHA: {last_seen[:8] if last_seen else 'None'}")
         
         try:
-            # Detect listings path on the repo's actual default branch
-            _branch, listings_path = resolve_listings_source(repo, LISTINGS_PATH)
-            
-            # Get new entries from this repo with TTL filtering
-            repo_entries = process_repo_entries(
-                repo, listings_path, last_seen, WATCH_PATHS,
-                WINDOW_HOURS, DATE_FIELD, DATE_FALLBACK,
-                seen, ttl_seconds, now_epoch,
-                location_gate=location_gate, drop_counts=location_drops
-            )
-            all_entries.extend(repo_entries)
+            if rebuilding:
+                try:
+                    in_window = window_listings(repo, now_epoch)
+                    added = rebuild_seen(seen, in_window, now_epoch)
+                except Exception as e:
+                    debug_log(f"[REBUILD] {repo} listings fetch failed: {e}")
+                    rebuild_failed.append(repo)
+                    continue
+                debug_log(f"[REBUILD] {repo} marked {added} keys from {len(in_window)} in-window listings as seen")
+            else:
+                # Detect listings path on the repo's actual default branch
+                _branch, listings_path = resolve_listings_source(repo, LISTINGS_PATH)
+
+                # Get new entries from this repo with TTL filtering
+                repo_entries = process_repo_entries(
+                    repo, listings_path, last_seen, WATCH_PATHS,
+                    WINDOW_HOURS, DATE_FIELD, DATE_FALLBACK,
+                    seen, ttl_seconds, now_epoch,
+                    location_gate=location_gate, drop_counts=location_drops
+                )
+                all_entries.extend(repo_entries)
             
             # Update last seen SHA for this repo
             commits = get_repo_entries(repo, per_page=1)
@@ -230,6 +256,14 @@ def main():
             debug_log(f"[ERROR] {repo} processing failed: {e}")
             continue
     
+    if rebuilding:
+        if rebuild_failed:
+            # A partial rebuild would let the missing repo's listings alert again next run
+            debug_log(f"[REBUILD] No listings from {rebuild_failed}; retrying the rebuild next run")
+        else:
+            save_seen(seen, SEEN_TTL_DAYS, str(seen_cache_path), dry_run=DRY_RUN)
+        return
+
     log_location_drops(location_drops)
 
     if not all_entries:

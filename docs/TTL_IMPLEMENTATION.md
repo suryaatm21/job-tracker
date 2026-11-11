@@ -15,6 +15,7 @@ This implementation adds a time-boxed "seen with TTL" memory system to the job-a
 - **File**: `.state/seen.json` - persistent TTL cache across workflow runs
 - **Format**: `{cache_key: last_alert_timestamp}` mapping
 - **Auto-cleanup**: Expired entries are removed during load/save operations
+- **Key version**: `seen_key_version`, next to `seen.json`, records which cache-key version the memory holds (`state_utils.SEEN_KEY_VERSION`). When the scheduled digest or DM watcher finds a non-empty memory with an older or missing version, that run marks every listing in its window as seen, sends nothing, and writes the new version. Bump the version whenever `get_cache_key` changes. The private digest keeps its own keys and never rebuilds.
 
 ### 3. Cache Key Strategy
 ```python
@@ -54,7 +55,7 @@ This implementation adds a time-boxed "seen with TTL" memory system to the job-a
   - `save_seen()` - Save cache with metadata
   - `should_alert_item()` - Check if item should trigger alert based on TTL
   - `get_cache_key()` - Generate consistent cache keys
-  - `normalize_url()` - URL normalization for consistent caching
+  - `normalize_url()` - imported from `dedup_utils`, the one URL key for dedup and caching
 
 ### Updated Files
 - **`.github/scripts/watch_repo.py`** - Multi-repo watcher with TTL filtering

@@ -28,6 +28,7 @@ _PREFIX_LEVELS = {
     "[CONFIG]": "INFO",
     "[INFO]": "INFO",
     "[MIGRATE]": "INFO",
+    "[REBUILD]": "INFO",
     "[TELEGRAM]": "INFO",
     "[CACHE]": "INFO",
     "[WINDOW]": "INFO",
