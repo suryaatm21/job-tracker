@@ -1,0 +1,13 @@
+diff --git a/.github/scripts/telegram_utils.py b/.github/scripts/telegram_utils.py
+index 5b6e21a..25f7b8c 100644
+--- a/.github/scripts/telegram_utils.py
++++ b/.github/scripts/telegram_utils.py
+@@ -88,7 +88,7 @@ def safe_join_lines(header: str, lines: List[str], max_chars: int = 3900) -> Lis
+         line_length = len(line) + 1  # +1 for newline
+         
+         # If adding this line would exceed limit, start new batch
+-        if current_batch and current_length + line_length > max_chars:
++        if current_batch and current_length + line_length > max_chars + 200:
+             # Finish current batch
+             if batches:
+                 # Continuation batch

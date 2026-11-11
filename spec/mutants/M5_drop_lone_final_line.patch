@@ -1,0 +1,13 @@
+diff --git a/.github/scripts/telegram_utils.py b/.github/scripts/telegram_utils.py
+index 5b6e21a..4967595 100644
+--- a/.github/scripts/telegram_utils.py
++++ b/.github/scripts/telegram_utils.py
+@@ -108,7 +108,7 @@ def safe_join_lines(header: str, lines: List[str], max_chars: int = 3900) -> Lis
+             current_length += line_length
+     
+     # Add final batch if there's content
+-    if current_batch:
++    if len(current_batch) > 1:
+         if batches:
+             # Final continuation batch
+             batch_text = "(cont.)\n\n" + "\n".join(current_batch)
