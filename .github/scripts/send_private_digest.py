@@ -350,6 +350,7 @@ def main():
     tiers = CompanyTiers(load_json("company_tiers.json"))
     locator = LocationMatcher(config.get("location", {}))
     role_gate = RoleGate(config.get("role_gate", {}))
+    engineering_only_sources = {s["name"] for s in config.get("sources", []) if s.get("engineering_only")}
     scoring = config.get("scoring", {})
     pay_gate = config.get("pay_gate", {})
     hours_per_year = float(pay_gate.get("hours_per_year", 2080))
@@ -407,7 +408,7 @@ def main():
             continue
         funnel.keep("pay", item)
 
-        dropped = role_gate.classify(item)
+        dropped = role_gate.classify(item, item["_source"] in engineering_only_sources)
         if dropped:
             funnel.drop_role(*dropped, item)
             continue

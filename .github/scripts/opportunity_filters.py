@@ -443,12 +443,19 @@ class RoleGate:
        ("Engineering Technician", "Embedded Account Executive").
     4. A PM board category drops unless the title names engineering work
        ("Product Engineer"); "Recipe Developer" in Simplify's Product bucket drops.
-    5. A title that, with the non-engineering terms cut out, still names
-       engineering/research work stays: "Software Engineer, Supply Chain" stays,
-       "Technology Operations Intern" drops. This holds in the non-engineering
-       board categories too, so zapply's "Other Jobs" keeps a "Research Intern".
-    6. Otherwise a non-engineering title term or category drops, and a listing
-       must have an engineering board category to stay.
+    5. A title with a non-engineering term stays only when the rest of it names
+       an engineering or research role (engineer, developer, scientist,
+       researcher), never on topical words like "AI" or "research" or via
+       "manager" or "analyst": "Test and Launch Operations Engineer I" stays,
+       "Marketing Manager, AI" drops. For the needs_qualifier_terms (supply
+       chain, talent, recruiting) a bare engineer is not enough: the rest must
+       also hold a qualifier such as software or ML. "Software Engineer, Supply
+       Chain" stays, "Supply Chain Engineer" drops.
+    6. With no non-engineering title term, an engineering title term keeps the
+       listing ("Research Intern" in zapply's "Other Jobs"); otherwise a
+       non-engineering category drops, an engineering category keeps, and with
+       neither the listing stays only when engineering_only is set (sources
+       that list only SWE roles) and drops as "no engineering/research term".
     Categories compare exactly, case-folded.
     """
 
@@ -468,6 +475,9 @@ class RoleGate:
         self.non_eng_title = _phrase_re(non_eng.get("title_terms", []))
         self.non_eng_categories = fold(non_eng.get("categories", []))
         self.eng_title = _phrase_re(eng.get("title_terms", []))
+        self.eng_role = _phrase_re(eng.get("role_terms", []))
+        self.qualified_terms = {_norm_role_text(t) for t in non_eng.get("needs_qualifier_terms", [])}
+        self.qualifier = _phrase_re(non_eng.get("qualifier_terms", []))
         self.eng_categories = fold(eng.get("categories", []))
 
     @staticmethod
@@ -475,7 +485,7 @@ class RoleGate:
         m = pattern.search(text) if pattern else None
         return m.group(0) if m else None
 
-    def classify(self, item):
+    def classify(self, item, engineering_only=False):
         title = _norm_role_text(item.get("title"))
         category = str(item.get("category") or "").strip().casefold()
 
@@ -492,14 +502,18 @@ class RoleGate:
         if category in self.pm_categories and not self._find(self.pm_category_rescue, title):
             return ROLE_PM, f"category: {item.get('category')}"
 
-        non_eng = self._find(self.non_eng_title, title)
-        rest = self.non_eng_title.sub(" ", title) if non_eng else title
-        if self._find(self.eng_title, rest):
+        matches = [m.group(0) for m in self.non_eng_title.finditer(title)] if self.non_eng_title else []
+        if matches:
+            rest = self.non_eng_title.sub(" ", title)
+            needs_qualifier = any(m in self.qualified_terms for m in matches)
+            if (self._find(self.eng_role, rest)
+                    and (not needs_qualifier or self._find(self.qualifier, rest))):
+                return None
+            return ROLE_NON_ENGINEERING, matches[0]
+        if self._find(self.eng_title, title):
             return None
-        if non_eng:
-            return ROLE_NON_ENGINEERING, non_eng
         if category in self.non_eng_categories:
             return ROLE_NON_ENGINEERING, f"category: {item.get('category')}"
-        if category in self.eng_categories:
+        if category in self.eng_categories or engineering_only:
             return None
         return ROLE_NON_ENGINEERING, "no engineering/research term"

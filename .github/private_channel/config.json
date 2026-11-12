@@ -5,10 +5,10 @@
     {"name": "SimplifyJobs/New-Grad-Positions", "type": "listings_json", "repo": "SimplifyJobs/New-Grad-Positions", "level": "new_grad"},
     {"name": "SimplifyJobs/Summer2027-Internships", "type": "listings_json", "repo": "SimplifyJobs/Summer2027-Internships", "level": "intern"},
     {"name": "vanshb03/Summer2027-Internships", "type": "listings_json", "repo": "vanshb03/Summer2027-Internships", "level": "intern"},
-    {"name": "speedyapply intern USA", "type": "markdown_tables", "repo": "speedyapply/2027-SWE-College-Jobs", "path": "README.md", "level": "intern"},
-    {"name": "speedyapply intern intl", "type": "markdown_tables", "repo": "speedyapply/2027-SWE-College-Jobs", "path": "INTERN_INTL.md", "level": "intern"},
-    {"name": "speedyapply new grad USA", "type": "markdown_tables", "repo": "speedyapply/2027-SWE-College-Jobs", "path": "NEW_GRAD_USA.md", "level": "new_grad"},
-    {"name": "speedyapply new grad intl", "type": "markdown_tables", "repo": "speedyapply/2027-SWE-College-Jobs", "path": "NEW_GRAD_INTL.md", "level": "new_grad"},
+    {"name": "speedyapply intern USA", "type": "markdown_tables", "repo": "speedyapply/2027-SWE-College-Jobs", "path": "README.md", "level": "intern", "engineering_only": true},
+    {"name": "speedyapply intern intl", "type": "markdown_tables", "repo": "speedyapply/2027-SWE-College-Jobs", "path": "INTERN_INTL.md", "level": "intern", "engineering_only": true},
+    {"name": "speedyapply new grad USA", "type": "markdown_tables", "repo": "speedyapply/2027-SWE-College-Jobs", "path": "NEW_GRAD_USA.md", "level": "new_grad", "engineering_only": true},
+    {"name": "speedyapply new grad intl", "type": "markdown_tables", "repo": "speedyapply/2027-SWE-College-Jobs", "path": "NEW_GRAD_INTL.md", "level": "new_grad", "engineering_only": true},
     {"name": "zapplyjobs/New-Grad-Jobs-2027", "type": "markdown_tables", "repo": "zapplyjobs/New-Grad-Jobs-2027", "path": "README.md", "level": "new_grad"},
     {"name": "instagram:zero2sudo", "type": "listings_json", "repo": "Supra16/JobTracker", "path": "feed/listings.json", "level": "unknown", "optional": true,
      "_about": "Supra's Instagram Stories monitor. Each entry may carry level 'new grad' or 'intern' from his classifier; otherwise the title decides, else it is posted under 'Level unknown'. Skipped with one log line while the file does not exist."}
@@ -99,7 +99,9 @@
       "ignore_phrases": ["silicon valley", "non silicon"]
     },
     "non_engineering": {
-      "_about": "always_drop_title_terms drop a listing whatever else the title says ('Engineering Technician', 'Embedded Account Executive'). A title_terms match drops it unless the title, with these terms cut out, still has an engineering title term ('Software Engineer, Supply Chain' stays). The categories are zapply sections that mix in non-engineering work: they are title-checked, not absolute, so a listing there stays only when its title, with these terms cut out, has an engineering title term ('Research Intern' stays, 'Supply Chain Internship' drops).",
+      "_about": "always_drop_title_terms drop a listing whatever else the title says ('Engineering Technician', 'Embedded Account Executive'). A title_terms match drops it unless the title, with these terms cut out, still names an engineering role (role_terms below): 'Test and Launch Operations Engineer I' stays, 'Marketing Manager, AI' and 'Clinical Research Coordinator' drop. needs_qualifier_terms also need a qualifier_terms word in the rest: 'Software Engineer, Supply Chain' stays, 'Supply Chain Engineer' drops. The categories are zapply sections that mix in non-engineering work: they are title-checked, not absolute, so a listing there stays only when its title has an engineering title term ('Research Intern' stays, 'Supply Chain Internship' drops).",
+      "needs_qualifier_terms": ["supply chain", "talent", "recruiting", "recruiter", "recruitment"],
+      "qualifier_terms": ["software", "ml", "machine learning", "ai", "data"],
       "always_drop_title_terms": ["technician", "technicians", "security guard", "account executive", "sales engineer"],
       "categories": ["Business & Operations", "Other Jobs"],
       "title_terms": [
@@ -115,7 +117,8 @@
       ]
     },
     "engineering": {
-      "_about": "A listing must have one of these title terms or categories. Trading titles are not research: 'Quantitative Trader' drops via 'trader'.",
+      "role_terms": ["engineer", "engineers", "engineering", "developer", "developers", "scientist", "scientists", "researcher", "researchers"],
+      "_about": "A listing must have one of these title terms or categories, unless its source sets engineering_only (the speedyapply boards list only SWE roles, so a generic title there stays). role_terms are the roles that rescue a title with a non-engineering term. Trading titles are not research: 'Quantitative Trader' drops via 'trader'.",
       "categories": ["Software", "Software Engineering", "AI/ML/Data", "Data Science, AI & Machine Learning", "Quant", "Quantitative Finance", "Hardware", "Hardware & Systems Engineering", "Security Engineering", "Data, AI & Research"],
       "title_terms": [
         "engineer", "engineers", "engineering", "developer", "developers", "software", "programmer", "swe", "sde", "technical staff",

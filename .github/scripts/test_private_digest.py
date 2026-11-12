@@ -315,8 +315,8 @@ class RoleGateTest(unittest.TestCase):
 
     gate = RoleGate(CONFIG["role_gate"])
 
-    def classify(self, title, category=None):
-        return self.gate.classify({"title": title, "category": category})
+    def classify(self, title, category=None, engineering_only=False):
+        return self.gate.classify({"title": title, "category": category}, engineering_only)
 
     def test_listings_from_the_scheduled_runs_drop_with_the_right_reason(self):
         # (company, title, the board's category for it, reason)
@@ -391,6 +391,24 @@ class RoleGateTest(unittest.TestCase):
         self.assertEqual(self.classify("Summer 2027 Intern"), (ROLE_NON_ENGINEERING, "no engineering/research term"))
         # speedyapply's sections group companies, so the title decides
         self.assertEqual(self.classify("Customer Experience Coordinator", "FAANG+")[0], ROLE_NON_ENGINEERING)
+
+    def test_non_engineering_terms_need_an_engineering_role_to_be_rescued(self):
+        for title in ["Marketing Manager, AI", "Research Operations Manager", "Clinical Research Coordinator",
+                      "Supply Chain Engineer", "Talent Engineer", "Supply Chain Data Analyst"]:
+            for category in (None, "Software"):
+                with self.subTest(title=title, category=category):
+                    self.assertEqual(self.classify(title, category)[0], ROLE_NON_ENGINEERING)
+        for title in ["Test and Launch Operations Engineer I", "Software Engineer, Supply Chain",
+                      "Machine Learning Engineer, Talent", "Data Engineer - Recruiting"]:
+            with self.subTest(title=title):
+                self.assertIsNone(self.classify(title))
+
+    def test_generic_titles_stay_only_on_engineering_only_sources(self):
+        self.assertEqual(self.classify("Summer 2027 Internship"), (ROLE_NON_ENGINEERING, "no engineering/research term"))
+        self.assertIsNone(self.classify("Summer 2027 Internship", engineering_only=True))
+        self.assertIsNone(self.classify("Summer 2027 Internship", "FAANG+", engineering_only=True))
+        self.assertEqual(self.classify("Supply Chain Internship", engineering_only=True)[0], ROLE_NON_ENGINEERING)
+        self.assertEqual(self.classify("Product Manager", engineering_only=True)[0], ROLE_PM)
 
     def test_trimmed_terms_win_over_engineering_words(self):
         cases = [("Engineering Technician 2/3", ROLE_NON_ENGINEERING, "technician"),
