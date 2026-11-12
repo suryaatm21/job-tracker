@@ -223,6 +223,8 @@ def safe_join_lines(header: str, lines: List[str], max_chars: int = 3900) -> Lis
     Lengths are counted in UTF-16 units, as Telegram counts them. A line that
     cannot fit in one Telegram message even on its own is truncated with an
     ellipsis; every other line stays whole, even one longer than max_chars.
+    When the first line fits a continuation message but not after the header,
+    the header goes alone and the line starts the next message.
 
     Args:
         header: Header text for first batch
@@ -241,11 +243,15 @@ def safe_join_lines(header: str, lines: List[str], max_chars: int = 3900) -> Lis
 
     first_room = TELEGRAM_LIMIT - tg_len(header) - 2
     room = TELEGRAM_LIMIT - tg_len(CONT_PREFIX)
+    header_alone = first_room < tg_len(lines[0]) <= room
+    if header_alone:
+        first_room = room
     fitted = [_truncate_line(line, max(first_room if i == 0 else room, 2)) for i, line in enumerate(lines)]
 
-    batches = []
+    batches = [header] if header_alone else []
     current_batch = []
-    current_length = tg_len(header) + 1  # header + "\n\n", less the first line's newline
+    # header + "\n\n" (or the continuation prefix), less the first line's newline
+    current_length = tg_len(CONT_PREFIX) if header_alone else tg_len(header) + 1
 
     for line in fitted:
         line_length = tg_len(line) + 1  # +1 for newline

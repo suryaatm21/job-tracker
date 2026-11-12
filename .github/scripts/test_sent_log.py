@@ -9,7 +9,10 @@ import io
 import json
 import os
 import pathlib
+import shutil
+import subprocess
 import sys
+import tempfile
 import unittest
 from unittest import mock
 
@@ -220,6 +223,57 @@ class ExtractorTest(SentLogCase):
         records = list(extract_sent_log.parse_log(log))
         self.assertEqual(len(records), 1)
         self.assertEqual(records[0]["text"], TEXT)
+
+    def test_sent_line_inside_dry_run_message_is_not_a_send(self):
+        # A dry run prints the message text raw, so a line of it can look like a record.
+        fake = '[SENT] {"ok": true}'
+        quoted = '[SENT] {"chat": "dm", "dry_run": false, "ok": true, "message_id": 1, "text": "x"}'
+        self.send(dry=True, text=f"Digest\n{fake}\n{quoted}\nlast line")
+        gh = "".join(f"digest\tRun digest\t2026-11-11T00:00:00.0000000Z {l}\n" for l in self.output.split("\n"))
+        for name, log in (("raw", self.output), ("gh", gh)):
+            with self.subTest(log=name):
+                self.assertEqual(list(extract_sent_log.parse_log(log)), [])
+                dry = list(extract_sent_log.parse_log(log, include_dry=True))
+                self.assertEqual([(r["dry_run"], r["ok"]) for r in dry], [(True, None)])
+                self.assertIn(fake, dry[0]["text"])
+
+    def test_end_marker_inside_dry_run_message_does_not_close_the_block(self):
+        fake = '[SENT] {"chat": "dm", "dry_run": false, "ok": true, "message_id": 1, "text": "x"}'
+        self.send(dry=True, text=f"Digest\n{extract_sent_log.END_MESSAGE}\n{fake}\nlast line")
+        gh = "".join(f"digest\tRun digest\t2026-11-11T00:00:00.0000000Z {l}\n" for l in self.output.split("\n"))
+        for name, log in (("raw", self.output), ("gh", gh)):
+            with self.subTest(log=name):
+                self.assertEqual(list(extract_sent_log.parse_log(log)), [])
+                self.assertEqual(len(list(extract_sent_log.parse_log(log, include_dry=True))), 1)
+
+    def test_markers_match_what_a_dry_run_prints(self):
+        self.send(dry=True, text="hello")
+        self.assertIn(f"\n{extract_sent_log.BEGIN_MESSAGE}\nhello\n{extract_sent_log.END_MESSAGE}\n", self.output)
+
+    def test_sent_line_printed_outside_a_message_block_needs_the_record_shape(self):
+        log = '[SENT] {"ok": true}\n[DRY-SENT] {"chat": "dm", "dry_run": false, "ok": true, "text": "x"}\n'
+        self.assertEqual(list(extract_sent_log.parse_log(log, include_dry=True)), [])
+
+
+class DocsExampleTest(unittest.TestCase):
+    """The jq audit examples in docs/TESTING.md print what their comments say."""
+
+    DOC = HERE.parent.parent / "docs" / "TESTING.md"
+
+    @unittest.skipUnless(shutil.which("jq"), "jq is not installed")
+    def test_last_three_messages_example_prints_the_last_three_whole_messages(self):
+        doc = self.DOC.read_text(encoding="utf-8")
+        command = next(l for l in doc.split("\n") if l.startswith("jq ") and '.chat == "dm"' in l)
+        # Two runs, newest first as the extractor prints them; each message is two lines.
+        rows = [(2, i, f"run2 msg{i}\nline two") for i in range(1, 3)] + \
+               [(1, i, f"run1 msg{i}\nline two") for i in range(1, 4)]
+        jsonl = "".join(json.dumps({"chat": "dm", "run_id": str(run), "text": text,
+                                    "ts": f"2026-11-1{run}T10:00:0{i}+00:00"}) + "\n"
+                        for run, i, text in rows)
+        with tempfile.TemporaryDirectory() as tmp:
+            pathlib.Path(tmp, "sent.jsonl").write_text(jsonl, encoding="utf-8")
+            out = subprocess.run(command, shell=True, cwd=tmp, capture_output=True, text=True, check=True).stdout
+        self.assertEqual(out, "run1 msg3\nline two\nrun2 msg1\nline two\nrun2 msg2\nline two\n")
 
 
 if __name__ == "__main__":

@@ -99,10 +99,10 @@
       "ignore_phrases": ["silicon valley", "non silicon"]
     },
     "non_engineering": {
-      "_about": "always_drop_title_terms drop a listing whatever else the title says ('Engineering Technician', 'Embedded Account Executive'). A title_terms match drops it unless the title, with these terms cut out, still names an engineering role (role_terms below): 'Test and Launch Operations Engineer I' stays, 'Marketing Manager, AI' and 'Clinical Research Coordinator' drop. needs_qualifier_terms also need a qualifier_terms word in the rest: 'Software Engineer, Supply Chain' stays, 'Supply Chain Engineer' drops. The categories are zapply sections that mix in non-engineering work: they are title-checked, not absolute, so a listing there stays only when its title has an engineering title term ('Research Intern' stays, 'Supply Chain Internship' drops).",
+      "_about": "always_drop_title_terms drop a listing whatever else the title says ('Engineering Technician', 'Embedded Account Executive', 'Information Security Officer'; 'officer' and 'officers' are whole words, so 'Security Engineer Intern' stays). A title_terms match drops it unless the title, with these terms cut out, still names an engineering role (role_terms below): 'Test and Launch Operations Engineer I' stays, 'Marketing Manager, AI' and 'Clinical Research Coordinator' drop. needs_qualifier_terms also need a qualifier_terms word in the rest: 'Software Engineer, Supply Chain' stays, 'Supply Chain Engineer' drops. The categories are zapply sections that mix in non-engineering work: they are title-checked, not absolute, so a listing there stays only when its title has an engineering title term ('Research Intern' stays, 'Supply Chain Internship' drops).",
       "needs_qualifier_terms": ["supply chain", "talent", "recruiting", "recruiter", "recruitment"],
       "qualifier_terms": ["software", "ml", "machine learning", "ai", "data"],
-      "always_drop_title_terms": ["technician", "technicians", "security guard", "account executive", "sales engineer", "sales engineering"],
+      "always_drop_title_terms": ["technician", "technicians", "security guard", "officer", "officers", "account executive", "sales engineer", "sales engineering"],
       "categories": ["Business & Operations", "Other Jobs"],
       "title_terms": [
         "business", "business development", "operations", "ops", "strategy", "consulting", "consultant", "coordinator", "administrative",
