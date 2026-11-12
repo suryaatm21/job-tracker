@@ -1,5 +1,5 @@
 {
-  "_about": "Private opportunity digest (send_private_digest.py). Hard gates: location (metros below); only when a listing states pay, the pay floor; then the role gate (role_gate below), which drops PM, silicon and non-engineering roles. Scoring then decides 'strong signal' vs 'maybe' among what is left; it never drops a listing. Company tiers live in company_tiers.json.",
+  "_about": "Private opportunity digest (send_private_digest.py). Hard gates: location (metros below; a source's missing_location_label passes its listings that have no locations); only when a listing states pay, the pay floor; then the role gate (role_gate below), which drops PM, silicon and non-engineering roles. Scoring then decides 'strong signal' vs 'maybe' among what is left; it never drops a listing. Company tiers live in company_tiers.json.",
 
   "sources": [
     {"name": "SimplifyJobs/New-Grad-Positions", "type": "listings_json", "repo": "SimplifyJobs/New-Grad-Positions", "level": "new_grad"},
@@ -10,8 +10,8 @@
     {"name": "speedyapply new grad USA", "type": "markdown_tables", "repo": "speedyapply/2027-SWE-College-Jobs", "path": "NEW_GRAD_USA.md", "level": "new_grad", "engineering_only": true},
     {"name": "speedyapply new grad intl", "type": "markdown_tables", "repo": "speedyapply/2027-SWE-College-Jobs", "path": "NEW_GRAD_INTL.md", "level": "new_grad", "engineering_only": true},
     {"name": "zapplyjobs/New-Grad-Jobs-2027", "type": "markdown_tables", "repo": "zapplyjobs/New-Grad-Jobs-2027", "path": "README.md", "level": "new_grad"},
-    {"name": "instagram:zero2sudo", "type": "listings_json", "repo": "Supra16/JobTracker", "path": "feed/listings.json", "level": "unknown", "optional": true,
-     "_about": "Supra's Instagram Stories monitor. Each entry may carry level 'new grad' or 'intern' from his classifier; otherwise the title decides, else it is posted under 'Level unknown'. Skipped with one log line while the file does not exist."}
+    {"name": "instagram:zero2sudo", "type": "listings_json", "repo": "Supra16/JobTracker", "path": "feed/listings.json", "level": "unknown", "optional": true, "missing_location_label": "sudo",
+     "_about": "Supra's Instagram Stories monitor. Each entry may carry level 'new grad' or 'intern' from his classifier; otherwise the title decides, else it is posted under 'Level unknown'. An entry with no locations passes the location gate and shows missing_location_label where the metros go (dedup then keys on its URL); an entry that lists locations goes through the location gate like any other. Skipped with one log line while the file does not exist."}
   ],
 
   "location": {

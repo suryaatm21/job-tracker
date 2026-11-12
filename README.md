@@ -112,7 +112,7 @@ Note on reopen/grace window: the watcher uses a short "reopen" grace window (def
 - **Schedule**: Every 2 hours at :20; manual runs default to a dry run that sends nothing
 - **Destination**: the repurposed PhD channel, renamed "job tracker" (secret `TELEGRAM_CHAT_ID_CHANNEL_SWE_ML_PHD`; see [docs/GITHUB_SECRETS_SETUP.md](docs/GITHUB_SECRETS_SETUP.md#private-job-tracker-channel))
 - **Config**: `.github/private_channel/config.json` holds the sources (one entry per feed, including Supra16/JobTracker's Instagram Stories feed, skipped until it exists), the metro city lists, the pay floor and the score weights; `company_tiers.json` holds the company tiers.
-- **Hard gates**: location (SF Bay Area, NYC, Los Angeles, Austin, Miami); only when a listing states pay, a pay floor; and a role gate that drops PM, silicon/chip-design and non-engineering roles (the term and category lists are in `config.json` under `role_gate`).
+- **Hard gates**: location (SF Bay Area, NYC, Los Angeles, Austin, Miami; a source with `missing_location_label` in `config.json`, currently the Instagram feed, passes listings that state no location and shows that label instead of a metro); only when a listing states pay, a pay floor; and a role gate that drops PM, silicon/chip-design and non-engineering roles (the term and category lists are in `config.json` under `role_gate`).
 - **Scoring** (soft, never drops a listing): company tiers, funding rounds and investors from each company's Simplify page, posted pay, and a penalty for PhD/MS-only roles. Each level (new grad, intern, unknown) gets a "Strong signal" section that shows why each listing scored, plus a compact "Maybe" section.
 
 ### Channel Digest Testing (`.github/workflows/channel-digest-testing.yml`)
