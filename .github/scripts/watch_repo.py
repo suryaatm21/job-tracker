@@ -22,7 +22,7 @@ from collections import Counter
 from datetime import datetime
 
 # Import all utility modules
-from github_helper import debug_log, is_not_found
+from github_helper import debug_log
 from state_utils import (
     load_seen, save_seen, should_alert_item, 
     get_cache_key, format_epoch_for_log, repo_rebuilt, mark_repo_rebuilt, should_include_item,
@@ -144,8 +144,16 @@ def build_location_gate(metros_json):
     """DM location gate from a DM_METROS JSON list; raises on a missing or invalid value."""
     if not metros_json:
         raise ValueError("DM_METROS is not set; the DM watcher will not run without a location gate")
+    try:
+        labels = json.loads(metros_json)
+    except ValueError:
+        labels = None
+    # A JSON object would iterate as its keys and silently pick metros; accept only a list of names
+    if not isinstance(labels, list) or not all(isinstance(label, str) for label in labels):
+        raise ValueError(f"DM_METROS must be a JSON list of metro names, got {metros_json!r}; "
+                         "the DM watcher will not run without a location gate")
     location_config = json.loads(LOCATION_CONFIG_PATH.read_text(encoding="utf-8"))["location"]
-    return metro_subset_matcher(location_config, json.loads(metros_json))
+    return metro_subset_matcher(location_config, labels)
 
 
 def log_location_drops(drop_counts):
@@ -158,13 +166,7 @@ def log_location_drops(drop_counts):
 def window_listings(repo, now_epoch):
     """The repo's current listings dated within WINDOW_HOURS (the watcher's own window test)."""
     cutoff = now_epoch - WINDOW_HOURS * 3600.0
-    try:
-        listings = fetch_listings(repo, LISTINGS_PATH)
-    except Exception as e:
-        if not is_not_found(e):
-            raise
-        debug_log(f"[REBUILD] {repo} listings file not found (404); counting it as an empty repo")
-        return []
+    listings = fetch_listings(repo, LISTINGS_PATH, missing_file_ok=True)
     if not isinstance(listings, list):
         raise ValueError(f"expected a list of listings, got {type(listings).__name__}")
     return [x for x in listings if in_window(x, cutoff, DATE_FIELD, DATE_FALLBACK)]

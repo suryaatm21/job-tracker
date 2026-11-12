@@ -5,6 +5,7 @@ silently, sending nothing, so no listing already sent under an old key posts twi
 
 Run: python -m unittest discover -s .github/scripts -p 'test_seen_key_rebuild.py'
 """
+import base64
 import contextlib
 import json
 import os
@@ -86,6 +87,12 @@ class KeyVersionMarker(StateDirTestCase):
         self.assertEqual(self.marker.read_text().strip(), str(state_utils.SEEN_KEY_VERSION))
         self.assertFalse(state_utils.seen_needs_rebuild({"k": 1}, str(self.seen_path)))
 
+    def test_unfinished_rebuild_stays_pending_when_the_memory_is_empty(self):
+        state_utils.save_seen({}, 14, str(self.seen_path), mark_version=False)
+        self.assertTrue(state_utils.seen_needs_rebuild({}, str(self.seen_path)))
+        state_utils.save_seen({}, 14, str(self.seen_path))
+        self.assertFalse(state_utils.seen_needs_rebuild({}, str(self.seen_path)))
+
     def test_dry_run_save_writes_nothing(self):
         state_utils.save_seen({"k": int(time.time())}, 14, str(self.seen_path), dry_run=True)
         self.assertEqual(list(self.state.iterdir()), [])
@@ -120,6 +127,48 @@ def failing_seen_save():
         return real(path, text)
 
     return mock.patch.object(state_utils, "write_atomic", side_effect=write)
+
+
+OTHER = "other/Repo"
+OTHER_ITEM = listing(4, "https://boards.greenhouse.io/other/jobs?gh_jid=4")
+REPO_MISSING = "repo-missing"  # GitHub answers 404 for the repo itself (renamed, deleted, private)
+# Only the repo lookup answers 404 (a transient GitHub error); its other endpoints still answer
+REPO_LOOKUP_404 = "repo-lookup-404"
+FILE_MISSING = "file-missing"  # the repo exists but has no listings file
+
+
+@contextlib.contextmanager
+def fake_github(repos, head="c" * 40):
+    """
+    Answer GitHub API calls from repos: {repo: listings | REPO_MISSING | REPO_LOOKUP_404 | FILE_MISSING}.
+    Patches both modules that call gh_get, so the real resolve and fetch code runs.
+    """
+    def gh_get(url, **params):
+        path = url[len(github_helper.GH):]
+        repo = next(r for r in repos if path == f"/repos/{r}" or path.startswith(f"/repos/{r}/"))
+        state = repos[repo]
+        rest = path[len(f"/repos/{repo}"):]
+        if state == REPO_MISSING or (state == REPO_LOOKUP_404 and rest == ""):
+            raise http_error(404)
+        if rest == "":
+            return {"default_branch": "dev"}
+        if rest == "/commits":
+            return [{"sha": head}]
+        if rest.startswith("/contents/"):
+            if state == FILE_MISSING:
+                raise http_error(404)
+            return {"encoding": "base64", "content": base64.b64encode(json.dumps(state).encode()).decode()}
+        raise AssertionError(f"unexpected GitHub call {url}")
+
+    with mock.patch.object(github_helper, "gh_get", side_effect=gh_get), \
+            mock.patch.object(repo_utils, "gh_get", side_effect=gh_get), \
+            mock.patch.dict(repo_utils._LISTINGS_SOURCE_CACHE, clear=True):
+        yield
+
+
+def expired_legacy_memory(seen_path):
+    """Old-key memory whose every entry is past the TTL pruning cutoff (14 + 2 days)."""
+    seen_path.write_text(json.dumps({LEGACY_KEY: int(time.time()) - 20 * 86400}))
 
 
 class DigestSilentFirstRun(StateDirTestCase):
@@ -217,6 +266,35 @@ class DigestSilentFirstRun(StateDirTestCase):
         self.assertFalse(state_utils.repo_rebuilt(self.state, other))
         self.assertFalse(self.marker.exists())
         self.assertEqual(self.sent_urls(run([NEW])), {NEW["url"]})
+
+    def test_rebuild_still_pending_after_pruning_empties_the_memory(self):
+        expired_legacy_memory(self.seen_path)
+        self.run_digest(None, status=500).assert_not_called()
+        self.assertEqual(self.memory(), {})  # pruning removed every legacy entry
+        send = self.run_digest([SENT, SIBLING])  # the repo recovers: rebuild silently, do not post
+        send.assert_not_called()
+        self.assertTrue(state_utils.repo_rebuilt(self.state, REPO))
+        self.assertIn(state_utils.get_cache_key(SENT), self.memory())
+        self.assertEqual(self.marker.read_text().strip(), str(state_utils.SEEN_KEY_VERSION))
+        self.assertFalse(state_utils.seen_needs_rebuild(self.memory(), str(self.seen_path)))
+
+    def run_digest_on(self, github):
+        send = mock.Mock(return_value=(True, []))
+        with fake_github(github):
+            self._run_digest(send, dry_run=False, repos=tuple(github))
+        return send
+
+    def test_missing_repo_is_a_fetch_failure_not_an_empty_repo(self):
+        self.write_legacy_memory()
+        send = self.run_digest_on({REPO: FILE_MISSING, OTHER: REPO_MISSING})
+        send.assert_not_called()
+        self.assertTrue(state_utils.repo_rebuilt(self.state, REPO))  # missing file: an empty repo
+        self.assertFalse(state_utils.repo_rebuilt(self.state, OTHER))  # missing repo: retry next run
+        self.assertFalse(self.marker.exists())
+        send = self.run_digest_on({REPO: FILE_MISSING, OTHER: [OTHER_ITEM]})  # the repo comes back
+        send.assert_not_called()
+        self.assertTrue(state_utils.repo_rebuilt(self.state, OTHER))
+        self.assertEqual(self.marker.read_text().strip(), str(state_utils.SEEN_KEY_VERSION))
 
     def test_dry_run_rebuild_writes_nothing(self):
         self.write_legacy_memory()
@@ -330,6 +408,47 @@ class WatcherSilentFirstRun(StateDirTestCase):
         process.assert_not_called()  # rebuilds again instead of replaying old commits
         send.assert_not_called()
         self.assertTrue(state_utils.repo_rebuilt(self.state, REPO))
+
+    def test_rebuild_still_pending_after_pruning_empties_the_memory(self):
+        expired_legacy_memory(self.seen_path)
+        with mock.patch.object(watch_repo, "window_listings", side_effect=RuntimeError("HTTP 500")):
+            send, _ = self.run_watcher([])
+        send.assert_not_called()
+        self.assertEqual(self.memory(), {})  # pruning removed every legacy entry
+        send, process = self.run_watcher([SENT, SIBLING], entries=[self.entry(SENT), self.entry(SIBLING)])
+        process.assert_not_called()  # the repo recovers: rebuild silently, do not alert
+        send.assert_not_called()
+        self.assertTrue(state_utils.repo_rebuilt(self.state, REPO))
+        self.assertIn(state_utils.get_cache_key(SENT), self.memory())
+        self.assertEqual(self.marker.read_text().strip(), str(state_utils.SEEN_KEY_VERSION))
+
+    def run_watcher_on(self, github):
+        send = mock.Mock(return_value=True)
+        process = mock.Mock(side_effect=lambda repo, *a, **kw: [self.entry(OTHER_ITEM)] if repo == OTHER else [])
+        with fake_github(github, head=self.HEAD), \
+                mock.patch.object(watch_repo, "STATE_DIR", self.state), \
+                mock.patch.object(watch_repo, "DRY_RUN", False), \
+                mock.patch.object(watch_repo, "TARGET_REPOS", list(github)), \
+                mock.patch.object(watch_repo, "process_repo_entries", process), \
+                mock.patch.object(watch_repo, "send_telegram", send), \
+                mock.patch.dict(os.environ, {"DM_METROS": '["SF Bay Area", "NYC"]'}):
+            watch_repo.main()
+        return send, process
+
+    def test_missing_repo_is_a_fetch_failure_not_an_empty_repo(self):
+        self.write_legacy_memory()
+        # A fully missing repo also fails the commits fetch, which already kept it pending;
+        # a 404 on the repo lookup alone is the case that counted it as empty
+        send, _ = self.run_watcher_on({REPO: FILE_MISSING, OTHER: REPO_LOOKUP_404})
+        send.assert_not_called()
+        self.assertTrue(state_utils.repo_rebuilt(self.state, REPO))  # missing file: an empty repo
+        self.assertFalse(state_utils.repo_rebuilt(self.state, OTHER))  # missing repo: retry next run
+        self.assertFalse(self.marker.exists())
+        send, process = self.run_watcher_on({REPO: FILE_MISSING, OTHER: [OTHER_ITEM]})  # the repo comes back
+        self.assertEqual([c.args[0] for c in process.call_args_list], [REPO])  # OTHER rebuilds instead
+        send.assert_not_called()
+        self.assertTrue(state_utils.repo_rebuilt(self.state, OTHER))
+        self.assertEqual(self.marker.read_text().strip(), str(state_utils.SEEN_KEY_VERSION))
 
     def test_failed_memory_save_keeps_the_repo_in_rebuild_mode(self):
         self.write_legacy_memory()

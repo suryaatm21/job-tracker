@@ -4,7 +4,7 @@ GitHub repository utilities for the job tracker.
 Handles commit fetching, file operations, and repository metadata.
 """
 import os
-from github_helper import fetch_file_content, fetch_file_json, debug_log, gh_get, GH
+from github_helper import fetch_file_content, fetch_file_json, debug_log, gh_get, GH, is_not_found
 
 DEFAULT_LISTINGS_PATH = ".github/scripts/listings.json"
 
@@ -36,15 +36,24 @@ def resolve_listings_source(repo, path_hint=DEFAULT_LISTINGS_PATH):
     return _LISTINGS_SOURCE_CACHE[cache_key]
 
 
-def fetch_listings(repo, path_hint=DEFAULT_LISTINGS_PATH):
+def fetch_listings(repo, path_hint=DEFAULT_LISTINGS_PATH, missing_file_ok=False):
     """
     Fetch and parse a repo's listings JSON from its default branch.
 
     Returns the parsed listings (a list for SimplifyJobs/vanshb03-style repos).
     Raises on fetch or parse failure; callers decide whether to skip the repo.
+    With missing_file_ok, a listings file missing from an existing repo (HTTP 404)
+    returns []. A 404 for the repo itself (renamed, deleted, made private, or a
+    GitHub error) still raises: that is a failed fetch, not an empty repo.
     """
     branch, path = resolve_listings_source(repo, path_hint)
-    listings = fetch_file_json(repo, path, ref=branch)
+    try:
+        listings = fetch_file_json(repo, path, ref=branch)
+    except Exception as e:
+        if not (missing_file_ok and is_not_found(e)):
+            raise
+        debug_log(f"[LISTINGS] {repo}@{branch}:{path} → listings file not found (404); counting it as an empty repo")
+        return []
     debug_log(f"[LISTINGS] {repo}@{branch}:{path} → {len(listings) if isinstance(listings, list) else 'object'} items")
     return listings
 

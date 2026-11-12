@@ -78,6 +78,14 @@ def key_version_path(path):
     return pathlib.Path(path).with_name("seen_key_version")
 
 
+def rebuild_pending_path(path):
+    """
+    Path of the marker that a rebuild started and is not finished, for the seen cache
+    at path. It lives outside seen.json so TTL pruning cannot remove it.
+    """
+    return pathlib.Path(path).with_name("seen_rebuild_pending")
+
+
 def load_seen(path=".state/seen.json"):
     """
     Load seen cache from JSON file.
@@ -118,11 +126,14 @@ def load_seen(path=".state/seen.json"):
 def seen_needs_rebuild(seen, path=".state/seen.json"):
     """
     True when seen holds entries saved under older keys: the memory is not empty
-    and its key-version marker is missing or older than SEEN_KEY_VERSION. Empty
-    memory needs no rebuild because there are no old keys to translate. A seen.json
-    that fails to load also starts empty and can repost the window; atomic saves
-    only prevent new truncation.
+    and its key-version marker is missing or older than SEEN_KEY_VERSION. Also
+    True while an unfinished rebuild is pending, even after TTL pruning emptied the
+    memory. Otherwise empty memory needs no rebuild because there are no old keys
+    to translate. A seen.json that fails to load also starts empty and can repost
+    the window; atomic saves only prevent new truncation.
     """
+    if rebuild_pending_path(path).exists():
+        return True
     if not seen:
         return False
     try:
@@ -184,6 +195,8 @@ def save_seen(seen, ttl_days, path=".state/seen.json", max_entries=200000, dry_r
         path: str, file path to save to
         max_entries: int, maximum entries to keep (sorted by most recent)
         dry_run: bool, if True write nothing (a dry run must not mark unsent items as seen)
+        mark_version: bool, False while a rebuild is unfinished: hold back the key version
+            and record the pending rebuild (see rebuild_pending_path)
 
     Returns:
         bool: True when seen.json was written. False on a dry run or a failed write,
@@ -211,11 +224,15 @@ def save_seen(seen, ttl_days, path=".state/seen.json", max_entries=200000, dry_r
             pruned_seen = dict(sorted_items[:max_entries])
             print(f"Warning: Seen cache capped at {max_entries} entries (was {len(seen)})")
         
+        # A rebuild is still unfinished: record that before pruning can empty the memory
+        if not mark_version:
+            write_atomic(rebuild_pending_path(seen_path), f"{SEEN_KEY_VERSION}\n")
         # Save to file
         write_atomic(seen_path, json.dumps(pruned_seen, indent=2))
         # Written after the memory, so a failed save leaves the old version in place
         if mark_version:
             write_atomic(key_version_path(seen_path), f"{SEEN_KEY_VERSION}\n")
+            rebuild_pending_path(seen_path).unlink(missing_ok=True)
         
         pruned_count = len(seen) - len(pruned_seen)
         if pruned_count > 0:

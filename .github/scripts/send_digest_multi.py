@@ -21,7 +21,7 @@ import time
 from datetime import datetime, timezone, timedelta
 
 # Utility imports
-from github_helper import debug_log, is_not_found
+from github_helper import debug_log
 from state_utils import (load_seen, save_seen, should_alert_item, get_cache_key, format_epoch_for_log,
                          should_include_item, seen_needs_rebuild, rebuild_seen,
                          repo_rebuilt, mark_repo_rebuilt)
@@ -72,13 +72,7 @@ STATE_DIR.mkdir(exist_ok=True, parents=True)
 
 def get_listings(repo):
     """Fetch listings from the repo's default branch; a missing listings file (404) is an empty repo, any other error raises"""
-    try:
-        return fetch_listings(repo, LISTINGS_PATH)
-    except Exception as e:
-        if not is_not_found(e):
-            raise
-        debug_log(f"[LISTINGS] {repo} → listings file not found (404); counting it as an empty repo")
-        return []
+    return fetch_listings(repo, LISTINGS_PATH, missing_file_ok=True)
 
 
 def should_include_listing(item):
