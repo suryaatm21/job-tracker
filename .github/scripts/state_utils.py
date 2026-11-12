@@ -70,7 +70,8 @@ def should_include_item(item):
 # Bump it whenever get_cache_key changes, so the first run on new keys rebuilds the
 # memory silently instead of posting every listing again (see rebuild_seen).
 # 2: URL keys keep identifying query parameters (?gh_jid=...) and path case.
-SEEN_KEY_VERSION = 2
+# 3: URL keys collapse doubled slashes in the path.
+SEEN_KEY_VERSION = 3
 
 
 def key_version_path(path):
