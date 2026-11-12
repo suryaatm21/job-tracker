@@ -4,7 +4,7 @@ The rules the bot must follow, in plain words. Every rule has an id, and the tes
 
 ## Message splitting (`telegram_utils.safe_join_lines`)
 
-- **BATCH-1** Splitting gives back exactly the input lines, in order. The first message starts with the header and a blank line; every later one starts with `(cont.)` and a blank line.
+- **BATCH-1** Splitting gives back the input lines, in order. A line too long to fit in one Telegram message by itself comes back cut short, ending in `…`; every other line comes back exactly. The first message starts with the header and a blank line; every later one starts with `(cont.)` and a blank line.
 - **BATCH-2** When every line fits, no message is longer than `max_chars`.
 - **BATCH-3** No message is longer than Telegram's 4096 limit, counted in UTF-16 units (an emoji outside the Basic Multilingual Plane counts 2). This holds at the default 3900 limit for lines of up to 300 one-unit characters.
 
@@ -15,8 +15,8 @@ The rules the bot must follow, in plain words. Every rule has an id, and the tes
 
 ## Duplicate removal (`dedup_utils`)
 
-- **DEDUP-1** The key ignores letter case in the scheme and host, a trailing slash, and the `#fragment`. Letter case in the path is undecided.
-- **DEDUP-2** Two listings share a key only if they are the same posting: query parameters that identify a posting (`?gh_jid=...`) count. The reference is `send_private_digest.canonical_url_key`.
+- **DEDUP-1** The key ignores letter case in the scheme and host, repeated slashes in the path (a run of slashes counts as one), a trailing slash, and the `#fragment`. Letter case in the path is undecided.
+- **DEDUP-2** Two listings share a key only if they are the same posting: query parameters that identify a posting (`?gh_jid=...`) count. The reference is `dedup_utils.normalize_url`.
 - **DEDUP-3** The digest dedup and the "already posted" memory turn a URL into a key the same way.
 - **DEDUP-4** The key is the normalized URL first, then the listing `id`, then (company, title) in lower case. The memory uses the same order.
 

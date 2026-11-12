@@ -599,6 +599,17 @@ class DedupTest(unittest.TestCase):
         self.assertEqual(len(kept), 1)
         self.assertEqual(funnel.drops["dedup:url"][LEVEL_NEW_GRAD], 1)
 
+    def test_doubled_slash_in_path_shares_a_key(self):
+        self.assertEqual(digest.normalize_url("https://site.com//jobs/1"),
+                         digest.normalize_url("https://site.com/jobs/1"))
+        self.assertEqual(digest.normalize_url("https://site.com/jobs//1"),
+                         digest.normalize_url("https://site.com/jobs/1"))
+        kept, funnel = self.run_dedup([
+            self.job("Acme", "SWE", "https://site.com//jobs/1", ["NYC"]),
+            self.job("Acme", "SWE", "https://site.com/jobs/1", ["NYC"])])
+        self.assertEqual(len(kept), 1)
+        self.assertEqual(funnel.drops["dedup:url"][LEVEL_NEW_GRAD], 1)
+
     def test_intern_and_new_grad_with_same_title_stay_separate(self):
         kept, _ = self.run_dedup([
             self.job("Acme", "Software Engineer", "https://a.test/ng", ["NYC"], level=LEVEL_NEW_GRAD),
