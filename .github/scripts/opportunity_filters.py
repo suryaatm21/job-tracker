@@ -111,6 +111,23 @@ US_STATE_CODES = frozenset(
     "al ak az ar ca co ct de dc fl ga hi id il in ia ks ky la me md ma mi mn ms mo mt ne nv nh nj nm ny "
     "nc nd oh ok or pa ri sc sd tn tx ut vt va wa wv wi wy".split())
 _COUNTRY_SEGMENTS = {"us", "usa", "u.s.", "u.s.a.", "united states"}
+US_STATE_NAMES = frozenset(
+    "alabama|alaska|arizona|arkansas|california|colorado|connecticut|delaware|district of columbia|"
+    "florida|georgia|hawaii|idaho|illinois|indiana|iowa|kansas|kentucky|louisiana|maine|maryland|"
+    "massachusetts|michigan|minnesota|mississippi|missouri|montana|nebraska|nevada|new hampshire|"
+    "new jersey|new mexico|new york|north carolina|north dakota|ohio|oklahoma|oregon|pennsylvania|"
+    "rhode island|south carolina|south dakota|tennessee|texas|utah|vermont|virginia|washington|"
+    "west virginia|wisconsin|wyoming".split("|"))
+# Countries by name only: two-letter country codes collide with state codes ("CA", "IN", "DE").
+_FOREIGN_COUNTRIES = frozenset(
+    "canada|mexico|brazil|argentina|chile|colombia|united kingdom|uk|england|scotland|wales|ireland|"
+    "france|germany|netherlands|belgium|switzerland|austria|spain|portugal|italy|denmark|sweden|"
+    "norway|finland|poland|czech republic|czechia|romania|ukraine|greece|turkey|israel|"
+    "united arab emirates|uae|saudi arabia|egypt|nigeria|kenya|south africa|india|pakistan|"
+    "bangladesh|china|hong kong|taiwan|japan|south korea|korea|singapore|malaysia|indonesia|"
+    "philippines|vietnam|thailand|australia|new zealand|costa rica|puerto rico".split("|"))
+# The comma-separated segment right after a city: "mountain view, hawaii (hybrid)" -> "hawaii "
+_AFTER_CITY_RE = re.compile(r"\s*,\s*([^,;/|>()•·\-–—_]*)")
 # New Jersey has no metro in config.json, so it gets its own whole-word rule.
 _NEW_JERSEY = _word_pattern("nj").pattern + "|" + _word_pattern("new jersey").pattern
 _NEW_JERSEY = re.compile(_NEW_JERSEY)
@@ -132,14 +149,28 @@ class LocationMatcher:
 
     The bare-name rule is what keeps "USA - New York - Malta" (upstate) and
     "Manhattan Beach, CA" out while "New York, NY" and "NYC" match.
+
+    A city named right before a comma and a US state or a country counts only
+    when that state is one of its metro's state_tokens: "Mountain View, CA"
+    matches, "Mountain View, Hawaii" and "Mountain View, HI" do not. A US country
+    segment, an unrecognized word, or a name of any configured metro there
+    ("Playa Vista, LA") leaves the match as it is.
+
+    labels limits matching to those metros; place names from every metro in
+    config still count, so a subset matcher reads "City, LA" the same way.
     """
 
-    def __init__(self, config):
+    def __init__(self, config, labels=None):
         self.include_remote = bool(config.get("include_remote", False))
         self.remote_patterns = [re.compile(p) for p in config.get("remote_patterns", [r"\bremote\b"])]
         self.filler_tokens = {t.lower() for t in config.get("filler_tokens", [])}
+        self.place_names = {name.lower() for metro in config.get("metros", [])
+                            for key in ("cities", "cities_needing_state", "bare_names")
+                            for name in metro.get(key, [])}
         self.metros = []
         for metro in config.get("metros", []):
+            if labels is not None and metro["label"] not in labels:
+                continue
             tokens = {t.lower() for t in metro.get("state_tokens", [])}
             state = max(tokens, key=len).title() if tokens else None
             self.metros.append({
@@ -161,11 +192,28 @@ class LocationMatcher:
         words = _SEPARATORS_RE.sub(" ", rest).split()
         return [w for w in words if w not in self.filler_tokens]
 
+    def _other_state_follows(self, metro, text, end):
+        """True when the segment after a city ending at end names a state or country not the metro's."""
+        m = _AFTER_CITY_RE.match(text, end)
+        if not m:
+            return False
+        segment = " ".join(m.group(1).split())
+        words = " ".join(w for w in segment.split() if w not in self.filler_tokens)
+        if not words or segment in _COUNTRY_SEGMENTS:
+            return False
+        if any(name in metro["tokens"] or name in self.place_names for name in (segment, words)):
+            return False
+        return any(name in US_STATE_CODES or name in US_STATE_NAMES or name in _FOREIGN_COUNTRIES
+                   for name in (segment, words))
+
     def _metro_matches(self, metro, text):
-        if any(p.search(text) for p in metro["cities"]):
+        if any(not self._other_state_follows(metro, text, m.end())
+               for p in metro["cities"] for m in p.finditer(text)):
             return True
         for pattern in metro["qualified"]:
             for m in pattern.finditer(text):
+                if self._other_state_follows(metro, text, m.end()):
+                    continue
                 rest = text[:m.start()] + " " + text[m.end():]
                 if any(s.search(rest) for s in metro["states"]) or not self._leftover(text, m.span()):
                     return True
@@ -249,7 +297,7 @@ def metro_subset_matcher(location_config, labels):
     unknown = [label for label in labels if label not in by_label]
     if not labels or unknown:
         raise ValueError(f"metro labels must be a non-empty subset of {sorted(by_label)}; got {labels}")
-    return LocationMatcher({**location_config, "metros": [by_label[label] for label in labels]})
+    return LocationMatcher(location_config, labels)
 
 
 # ---------------------------------------------------------------------------

@@ -161,6 +161,20 @@ class LocationTest(unittest.TestCase):
         self.assertEqual(c({"locations": ["Seattle, WA or Austin, TX"]}), (LOCATION_MATCH, ["Austin"]))
         self.assertEqual(c({"locations": ["Remote - San Francisco, CA"]})[0], LOCATION_REMOTE)  # remote job, excluded
 
+    def test_city_followed_by_another_state_or_country_does_not_match(self):
+        for location in ["Mountain View, Hawaii", "Mountain View, HI", "Irvine, Nevada", "Austin, Minnesota",
+                         "Fort Lauderdale, GA", "Palo Alto, Canada", "Santa Monica, United Kingdom"]:
+            with self.subTest(location=location):
+                self.assertEqual(self.matcher.classify({"locations": [location]}), (LOCATION_ELSEWHERE, []))
+        # Agreeing or absent states, US country segments and a following metro name keep matching
+        cases = {"Mountain View, CA": ["SF Bay Area"], "Mountain View": ["SF Bay Area"],
+                 "Mountain View, California, USA": ["SF Bay Area"], "Playa Vista, LA": ["Los Angeles"],
+                 "San Francisco, CA/New York, NY": ["SF Bay Area", "NYC"],
+                 "San Francisco, New York": ["SF Bay Area"]}
+        for location, labels in cases.items():
+            with self.subTest(location=location):
+                self.assertEqual(self.matcher.classify({"locations": [location]}), (LOCATION_MATCH, labels))
+
     def test_remote_switch(self):
         cfg = dict(CONFIG["location"], include_remote=True)
         self.assertEqual(LocationMatcher(cfg).classify({"locations": ["Remote in USA"]}), (LOCATION_MATCH, ["Remote"]))
@@ -457,6 +471,15 @@ class RoleGateTest(unittest.TestCase):
                 with self.subTest(title=title, category=category):
                     self.assertEqual(self.classify(title, category), (reason, term))
         self.assertIsNone(self.classify("Fabric Engineer"))  # "fab" is a whole word only
+
+    def test_officer_titles_drop_and_security_engineering_stays(self):
+        for title in ["Information Security Officer", "Chief Security Officer Intern", "Security Officer"]:
+            for category in (None, "Software", "Security Engineering", "Other Jobs"):
+                with self.subTest(title=title, category=category):
+                    self.assertEqual(self.classify(title, category), (ROLE_NON_ENGINEERING, "officer"))
+        for title in ["Security Engineer Intern", "Security Analyst Intern"]:
+            with self.subTest(title=title):
+                self.assertIsNone(self.classify(title))
 
     def test_multiword_non_engineering_terms_win_over_their_own_words(self):
         self.assertEqual(self.classify("Sales Engineer"), (ROLE_NON_ENGINEERING, "sales engineer"))

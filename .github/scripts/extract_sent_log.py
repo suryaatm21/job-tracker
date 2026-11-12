@@ -26,21 +26,43 @@ from typing import Iterable, Iterator, List, Optional
 # Matches anywhere in the line: gh prefixes each log line with "job<TAB>step<TAB>timestamp ".
 # The literal "] " after the tag keeps "[SENT-SUMMARY]" lines out.
 RECORD_RE = re.compile(r"\[(SENT|DRY-SENT)\] (\{.*\})\s*$")
+# A dry run prints each message raw between these markers (telegram_utils.send_message),
+# so a line of message text there can look like a record.
+BEGIN_MESSAGE = "----- BEGIN MESSAGE -----"
+END_MESSAGE = "----- END MESSAGE -----"
 
 
 def parse_log(text: str, include_dry: bool = False) -> Iterator[dict]:
-    """Yield each sent-message record found in a run log."""
+    """Yield each sent-message record found in a run log.
+
+    Lines inside a dry run's readable message block are skipped, and a match
+    counts only when it decodes to a record whose dry_run flag agrees with its tag.
+    """
+    in_message = False
     # Split on "\n" only: str.splitlines() also breaks on U+2028 and friends.
     for line in text.split("\n"):
+        tail = line.rstrip()
+        if in_message:
+            in_message = not tail.endswith(END_MESSAGE)
+            continue
+        if tail.endswith(BEGIN_MESSAGE):
+            in_message = True
+            continue
         match = RECORD_RE.search(line)
         if not match:
             continue
-        if match.group(1) == "DRY-SENT" and not include_dry:
+        dry = match.group(1) == "DRY-SENT"
+        if dry and not include_dry:
             continue
         try:
-            yield json.loads(match.group(2))
+            record = json.loads(match.group(2))
         except ValueError:
             print(f"[extract] skipped unparseable record: {line[:120]}", file=sys.stderr)
+            continue
+        if not isinstance(record, dict) or record.get("dry_run") is not dry or "text" not in record:
+            print(f"[extract] skipped line that is not a sent record: {line[:120]}", file=sys.stderr)
+            continue
+        yield record
 
 
 def _gh(args: List[str]) -> Optional[str]:

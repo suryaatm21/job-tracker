@@ -167,6 +167,27 @@ class StateCodeTest(unittest.TestCase):
         self.assertEqual(format_location(["New York, United States", "Seattle, WA"], "dm"), "New York")
 
 
+class ExplicitStateTest(unittest.TestCase):
+    """A city followed by a state or country matches its metro only when they agree."""
+
+    GATE = metro_subset_matcher(LOCATION_CONFIG, ["SF Bay Area", "NYC"])
+
+    def test_dm_gate_drops_a_metro_city_in_another_state(self):
+        for location in ["Mountain View, Hawaii", "Mountain View, HI", "Mountain View, Hawaii, USA",
+                         "Sunnyvale, Texas", "Palo Alto, Canada"]:
+            with self.subTest(location=location):
+                self.assertEqual(self.GATE.classify({"locations": [location]})[0], "elsewhere")
+        for location in ["Mountain View, CA", "Mountain View, California", "Mountain View, CA, USA",
+                         "Mountain View", "Mountain View, United States", "Mountain View, CA (Hybrid)"]:
+            with self.subTest(location=location):
+                self.assertEqual(self.GATE.classify({"locations": [location]}), ("match", ["SF Bay Area"]))
+
+    def test_dm_state_label_honors_a_spelled_out_state(self):
+        from format_utils import format_location
+        self.assertEqual(format_location(["Mountain View, Hawaii", "New York, NY"], "dm"), "New York")
+        self.assertEqual(format_location(["Mountain View, CA", "New York, NY"], "dm"), "California")
+
+
 class WatchRepoEmojiTest(unittest.TestCase):
     def test_emoji_heavy_alert_is_batched_not_sent_whole(self):
         import watch_repo, telegram_utils
@@ -224,6 +245,27 @@ class OversizedHeaderTest(unittest.TestCase):
     def test_lone_text_that_fits_is_not_cut(self):
         import telegram_utils
         self.assertEqual(telegram_utils.safe_join_lines("x" * 4050, []), ["x" * 4050])
+
+
+class FirstLineAfterHeaderTest(unittest.TestCase):
+    def test_first_line_that_fits_a_message_moves_whole_to_the_next(self):
+        import telegram_utils
+        header = "H" * 50
+        line = "• listing " + "x" * 4040 + " https://example.com/apply"  # 4076 units: too long after the header
+        with contextlib.redirect_stdout(io.StringIO()) as out:
+            batches = telegram_utils.safe_join_lines(header, [line, "second"])
+        self.assertNotIn("ERROR", out.getvalue())
+        self.assertEqual(batches, [header, telegram_utils.CONT_PREFIX + line, telegram_utils.CONT_PREFIX + "second"])
+        self.assertTrue(all(telegram_utils.tg_len(b) <= telegram_utils.TELEGRAM_LIMIT for b in batches))
+
+    def test_first_line_too_long_for_any_message_is_still_cut_after_the_header(self):
+        import telegram_utils
+        header = "H" * 50
+        with contextlib.redirect_stdout(io.StringIO()) as out:
+            batches = telegram_utils.safe_join_lines(header, ["y" * 5000, "next"])
+        self.assertIn("ERROR", out.getvalue())
+        self.assertEqual(batches[0], header + "\n\n" + "y" * 4043 + "\u2026")
+        self.assertEqual(batches[1:], [telegram_utils.CONT_PREFIX + "next"])
 
 
 if __name__ == "__main__":

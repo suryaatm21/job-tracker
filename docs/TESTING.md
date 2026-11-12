@@ -213,7 +213,7 @@ python .github/scripts/extract_sent_log.py --log-file run.log                   
 
 # Failed sends, and the last 3 messages to a chat:
 jq -c 'select(.ok == false) | {run_id, chat, error}' sent.jsonl
-jq -r 'select(.chat == "dm") | .text' sent.jsonl | head -n 3
+jq -rs 'map(select(.chat == "dm")) | sort_by(.ts) | .[-3:][] | .text' sent.jsonl
 ```
 
 To check for a regression, diff the `text` of new records against an earlier run's, or look for failed sends and unexpected `chars` or empty fields. Logs exist only for runs GitHub still retains, and runs in progress are skipped.
