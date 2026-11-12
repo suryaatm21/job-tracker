@@ -95,18 +95,19 @@
     },
     "silicon": {
       "_about": "Chip-design work, dropped even when titled Engineer. Other hardware engineering stays.",
-      "title_terms": ["silicon", "asic", "rtl", "vlsi", "design verification", "physical design", "dft", "design for test", "design for testability", "chip design", "ic design"],
+      "title_terms": ["silicon", "asic", "rtl", "vlsi", "design verification", "physical design", "dft", "design for test", "design for testability", "chip design", "ic design", "tapeout", "fab", "cleanroom"],
       "ignore_phrases": ["silicon valley", "non silicon"]
     },
     "non_engineering": {
-      "_about": "A title term drops the listing unless the title, with these terms cut out, still has an engineering title term ('Software Engineer, Supply Chain' stays; 'sales engineer' is cut out whole, so it drops). The categories drop whatever the title says.",
+      "_about": "always_drop_title_terms drop a listing whatever else the title says ('Engineering Technician', 'Embedded Account Executive'). A title_terms match drops it unless the title, with these terms cut out, still has an engineering title term ('Software Engineer, Supply Chain' stays). The categories are zapply sections that mix in non-engineering work: they are title-checked, not absolute, so a listing there stays only when its title, with these terms cut out, has an engineering title term ('Research Intern' stays, 'Supply Chain Internship' drops).",
+      "always_drop_title_terms": ["technician", "technicians", "security guard", "account executive", "sales engineer"],
       "categories": ["Business & Operations", "Other Jobs"],
       "title_terms": [
         "business", "business development", "operations", "ops", "strategy", "consulting", "consultant", "coordinator", "administrative",
         "supply chain", "logistics", "procurement", "sourcing", "purchasing", "buyer", "merchandising", "retail", "store", "branch",
         "talent", "recruiting", "recruiter", "recruitment", "human resources", "hr",
         "marketing", "market research", "brand", "communications", "public relations", "content", "social media",
-        "sales", "sales engineer", "account executive", "account manager", "customer success",
+        "sales", "account manager", "customer success",
         "finance", "financial", "accounting", "accountant", "audit", "tax", "treasury", "banking", "banker", "investment banking",
         "trader", "trading", "underwriter", "underwriting", "actuarial", "claims", "risk",
         "legal", "counsel", "paralegal", "attorney", "compliance",

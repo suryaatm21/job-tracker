@@ -375,13 +375,37 @@ class RoleGateTest(unittest.TestCase):
         # Simplify's Product bucket drops unless the title names engineering work
         self.assertEqual(self.classify("Recipe Developer", "Product"), (ROLE_PM, "category: Product"))
         self.assertIsNone(self.classify("Product Engineer", "Product"))
-        # zapply's non-engineering sections drop whatever the title says
-        self.assertEqual(self.classify("Data Engineer", "Other Jobs"), (ROLE_NON_ENGINEERING, "category: Other Jobs"))
+        # zapply's non-engineering sections are title-checked: engineering/research titles stay
+        for title in ["Research Intern", "R&D Engineering Intern", "Data Engineer", "Associate Scientist, Clinical Immunology",
+                      "AI Solutions Engineer Intern", "Test and Launch Operations Engineer I",
+                      "Intern - Component Engineering", "Assoc Detection Engineering Intern"]:
+            for category in ("Other Jobs", "Business & Operations"):
+                with self.subTest(title=title, category=category):
+                    self.assertIsNone(self.classify(title, category))
+        self.assertEqual(self.classify("Utilities Analyst Intern", "Other Jobs"),
+                         (ROLE_NON_ENGINEERING, "category: Other Jobs"))
+        self.assertEqual(self.classify("Supply Chain Internship", "Business & Operations"),
+                         (ROLE_NON_ENGINEERING, "supply chain"))
         # An engineering category keeps a bare title; no category and no term drops
         self.assertIsNone(self.classify("Summer 2027 Intern", "AI/ML/Data"))
         self.assertEqual(self.classify("Summer 2027 Intern"), (ROLE_NON_ENGINEERING, "no engineering/research term"))
         # speedyapply's sections group companies, so the title decides
         self.assertEqual(self.classify("Customer Experience Coordinator", "FAANG+")[0], ROLE_NON_ENGINEERING)
+
+    def test_trimmed_terms_win_over_engineering_words(self):
+        cases = [("Engineering Technician 2/3", ROLE_NON_ENGINEERING, "technician"),
+                 ("Robotics Technician (Days)", ROLE_NON_ENGINEERING, "technician"),
+                 ("Security Guard", ROLE_NON_ENGINEERING, "security guard"),
+                 ("Embedded Account Executive", ROLE_NON_ENGINEERING, "account executive"),
+                 ("Strategic Account Executive, Engineering and Construction", ROLE_NON_ENGINEERING, "account executive"),
+                 ("Tapeout Biz Products & Engineering", ROLE_SILICON, "tapeout"),
+                 ("Fab Process Engineer", ROLE_SILICON, "fab"),
+                 ("Cleanroom Equipment Engineer", ROLE_SILICON, "cleanroom")]
+        for title, reason, term in cases:
+            for category in (None, "Software", "Other Jobs", "Business & Operations"):
+                with self.subTest(title=title, category=category):
+                    self.assertEqual(self.classify(title, category), (reason, term))
+        self.assertIsNone(self.classify("Fabric Engineer"))  # "fab" is a whole word only
 
     def test_multiword_non_engineering_terms_win_over_their_own_words(self):
         self.assertEqual(self.classify("Sales Engineer"), (ROLE_NON_ENGINEERING, "sales engineer"))
