@@ -7,8 +7,11 @@ send listings from every location, exactly as before.
 Run: python -m unittest discover -s .github/scripts -p 'test_manual_dm_commands.py'
 """
 import importlib.util
+import json
 import os
 import pathlib
+import shutil
+import subprocess
 import time
 import unittest
 from unittest import mock
@@ -183,18 +186,36 @@ class WorkflowWiring(unittest.TestCase):
     MANUAL_SCRIPTS = ("manual/send_latest_listing.py", "manual/send_todays_listings.py",
                       "manual/send_recent_listings.py")
 
-    def test_only_the_dm_workflow_sets_dm_metros_for_manual_commands(self):
-        users = {p.name: p.read_text(encoding="utf-8") for p in WORKFLOWS.glob("*.yml")
-                 if any(s in p.read_text(encoding="utf-8") for s in self.MANUAL_SCRIPTS)}
-        self.assertIn("dm-fast-watch.yml", users)
-        self.assertGreater(len(users), 1)
-        for name, text in users.items():
-            if name == "dm-fast-watch.yml":
-                # Workflow-level env (before jobs:) so every manual step receives it
-                self.assertIn("DM_METROS", text.split("\njobs:", 1)[0])
-            else:
-                self.assertNotIn("DM_METROS", text, name)
+    @staticmethod
+    def load_workflow(path):
+        ruby = shutil.which("ruby")
+        if ruby is None:
+            raise unittest.SkipTest("ruby is needed to parse workflow YAML")
+        out = subprocess.run(
+            [ruby, "-ryaml", "-rjson", "-e", "puts JSON.generate(YAML.safe_load(File.read(ARGV[0])))", str(path)],
+            capture_output=True, text=True, check=True).stdout
+        return json.loads(out)
 
+    def manual_step_envs(self, workflow):
+        envs = []
+        for job in (workflow.get("jobs") or {}).values():
+            for step in job.get("steps") or []:
+                if any(s in (step.get("run") or "") for s in self.MANUAL_SCRIPTS):
+                    envs.append({**(workflow.get("env") or {}), **(job.get("env") or {}),
+                                 **(step.get("env") or {})})
+        return envs
+
+    def test_only_the_dm_workflow_sets_dm_metros_for_manual_commands(self):
+        by_name = {p.name: self.manual_step_envs(self.load_workflow(p)) for p in WORKFLOWS.glob("*.yml")}
+        by_name = {name: envs for name, envs in by_name.items() if envs}
+        self.assertIn("dm-fast-watch.yml", by_name)
+        self.assertGreater(len(by_name), 1)
+        for name, envs in by_name.items():
+            for env in envs:
+                if name == "dm-fast-watch.yml":
+                    self.assertEqual(json.loads(env["DM_METROS"]), ["SF Bay Area", "NYC"])
+                else:
+                    self.assertNotIn("DM_METROS", env, name)
 
 if __name__ == "__main__":
     unittest.main()
