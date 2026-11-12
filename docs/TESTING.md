@@ -190,6 +190,14 @@ python -m unittest discover -s .github/scripts -p 'test_dm_location_gate.py'
 
 Proves DM alerts keep only SF Bay Area and NYC listings (a listing passes when any of its locations matches), drop remote-only and location-less listings, log drop counts per reason, and that the channel digest still keeps listings from other cities.
 
+### Manual DM command tests (no network):
+
+```bash
+python -m unittest discover -s .github/scripts -p 'test_manual_dm_commands.py'
+```
+
+Proves the manual `latest`, `today` and `recent` scripts send only SF Bay Area and NYC listings when `DM_METROS` is set (the DM workflow), apply `COUNT` after the gate, send their usual "nothing found" message when no listing passes, and send listings from every location when `DM_METROS` is unset (the channel digests).
+
 ### Sent-message log
 
 Every Telegram message, from every workflow and manual script, goes through `send_message` in `.github/scripts/telegram_utils.py`, which writes one line per message to the run log:

@@ -3,11 +3,14 @@
 Fetch the latest listing from the target repository's listings file and send it via Telegram.
 Relies on env vars: TARGET_REPO, LISTINGS_PATH (default listings.json), GH_TOKEN, TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID
 DRY_RUN=true prints the message instead of sending it.
+DM_METROS (JSON list, optional): when set, only listings in those metros count, by the
+DM watcher's location gate; unset (the channel digests) sends the latest listing anywhere.
 """
 import os, sys
 # Shared modules live one level up in .github/scripts; Python only adds this file's own dir to sys.path
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from format_utils import format_location, format_job_line
+from opportunity_filters import optional_location_gate, passes_location_gate
 from repo_utils import fetch_listings
 from telegram_utils import send_message
 
@@ -23,6 +26,8 @@ def send_telegram(text: str):
     return ok
 
 def main():
+    location_gate = optional_location_gate(os.getenv("DM_METROS"))
+    prefix = f"{MESSAGE_PREFIX}: " if MESSAGE_PREFIX else ""
     try:
         # Default-branch aware, and handles >1MB listings files via download_url
         data = fetch_listings(TARGET_REPO, LISTINGS_PATH)
@@ -33,6 +38,14 @@ def main():
     if not isinstance(data, list) or not data:
         print("No listings found in", LISTINGS_PATH)
         return 0
+
+    if location_gate is not None:
+        metros = ", ".join(m["label"] for m in location_gate.metros)
+        data = [x for x in data if passes_location_gate(location_gate, x)]
+        print(f"Location gate (DM_METROS): {len(data)} listings in {metros}")
+        if not data:
+            send_telegram(f"{prefix}No listings found in {metros}.")
+            return 0
 
     # Pick the latest by date field, falling back if missing
     def ts(item):
@@ -62,8 +75,6 @@ def main():
     # Use format_job_line for consistent formatting
     formatted_line = format_job_line(company, title, season, location, url, html=False)
     
-    # Add context prefix if provided
-    prefix = f"{MESSAGE_PREFIX}: " if MESSAGE_PREFIX else ""
     text = f"{prefix}Latest listing:\n{formatted_line}"
     send_telegram(text)
     return 0
