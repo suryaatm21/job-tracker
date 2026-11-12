@@ -34,9 +34,7 @@ from repo_utils import resolve_listings_source, get_repo_entries, fetch_listings
 from dedup_utils import get_dedup_key, get_unified_season, in_window
 from job_filtering import should_process_repo_item
 from watcher_core import process_repo_entries
-from opportunity_filters import metro_subset_matcher, LOCATION_ELSEWHERE, LOCATION_REMOTE, LOCATION_UNKNOWN
-
-LOCATION_CONFIG_PATH = pathlib.Path(__file__).resolve().parents[1] / "private_channel" / "config.json"
+from opportunity_filters import build_location_gate, LOCATION_ELSEWHERE, LOCATION_REMOTE, LOCATION_UNKNOWN
 
 # Multi-repo configuration
 TARGET_REPOS = json.loads(os.environ.get("TARGET_REPOS", '["vanshb03/Summer2027-Internships"]'))
@@ -139,22 +137,6 @@ def migrate_legacy_state():
         
     except Exception as e:
         debug_log(f"[MIGRATE] Legacy state migration failed: {e}")
-
-def build_location_gate(metros_json):
-    """DM location gate from a DM_METROS JSON list; raises on a missing or invalid value."""
-    if not metros_json:
-        raise ValueError("DM_METROS is not set; the DM watcher will not run without a location gate")
-    try:
-        labels = json.loads(metros_json)
-    except ValueError:
-        labels = None
-    # A JSON object would iterate as its keys and silently pick metros; accept only a list of names
-    if not isinstance(labels, list) or not all(isinstance(label, str) for label in labels):
-        raise ValueError(f"DM_METROS must be a JSON list of metro names, got {metros_json!r}; "
-                         "the DM watcher will not run without a location gate")
-    location_config = json.loads(LOCATION_CONFIG_PATH.read_text(encoding="utf-8"))["location"]
-    return metro_subset_matcher(location_config, labels)
-
 
 def log_location_drops(drop_counts):
     """One line of location-gate drop counts per reason (counts only, no listing text)."""

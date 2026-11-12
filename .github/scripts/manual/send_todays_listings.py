@@ -8,6 +8,8 @@ Configuration via environment variables:
 - GH_TOKEN [recommended for higher rate limits]
 - TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID [required to send messages]
 - DATE_FIELD [default: "date_posted"], DATE_FALLBACK [default: "date_updated"]
+- DM_METROS (JSON list) [optional]: when set, only listings in those metros are sent, by the
+  DM watcher's location gate; unset (the channel digests) sends listings from every location
 
 Assumptions and behavior:
 - Dates are stored as Unix epoch seconds. If not, ISO-8601 is also accepted.
@@ -24,6 +26,7 @@ from dedup_utils import get_dedup_key
 from repo_utils import fetch_listings
 from telegram_utils import send_message
 from format_utils import format_location, format_job_line
+from opportunity_filters import optional_location_gate, passes_location_gate
 
 # Multi-repo support with fallback to single repo
 TARGET_REPOS_STR = os.getenv("TARGET_REPOS")
@@ -83,6 +86,7 @@ def to_epoch(v) -> int:
 
 def main() -> int:
     """Entrypoint: fetch listings from multiple repos, filter those posted today (UTC), and notify."""
+    location_gate = optional_location_gate(os.getenv("DM_METROS"))
     today = datetime.now(timezone.utc).date()
     all_todays = []
     seen_keys = set()
@@ -111,6 +115,9 @@ def main() -> int:
                     
                 d = datetime.fromtimestamp(epoch, tz=timezone.utc).date()
                 if d == today:
+                    # Gate before dedup so an out-of-metro copy cannot claim the key
+                    if not passes_location_gate(location_gate, x):
+                        continue
                     dedup_key = get_dedup_key(x)
                     if dedup_key and dedup_key not in seen_keys:
                         seen_keys.add(dedup_key)

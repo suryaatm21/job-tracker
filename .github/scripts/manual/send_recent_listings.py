@@ -8,7 +8,9 @@ Configuration via environment variables:
 - GH_TOKEN [recommended for higher rate limits]
 - TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID [required to send messages]
 - DATE_FIELD [default: "date_posted"], DATE_FALLBACK [default: "date_updated"]
-- COUNT [default: 10]
+- COUNT [default: 10], applied after the location gate
+- DM_METROS (JSON list) [optional]: when set, only listings in those metros are sent, by the
+  DM watcher's location gate; unset (the channel digests) sends listings from every location
 """
 import os, sys
 # Shared modules live one level up in .github/scripts; Python only adds this file's own dir to sys.path
@@ -19,6 +21,7 @@ from dedup_utils import get_dedup_key
 from repo_utils import fetch_listings
 from telegram_utils import send_message
 from format_utils import format_location, format_job_line
+from opportunity_filters import optional_location_gate, passes_location_gate
 
 # Multi-repo support with fallback to single repo
 TARGET_REPOS_STR = os.getenv("TARGET_REPOS")
@@ -134,6 +137,7 @@ def sort_key(item) -> int:
     return to_epoch(v)
 
 def main() -> int:
+    location_gate = optional_location_gate(os.getenv("DM_METROS"))
     all_items = []
     seen_keys = set()
     
@@ -160,6 +164,9 @@ def main() -> int:
                     continue
                     
                 if sort_key(x) > 0:  # Valid timestamp
+                    # Gate before dedup so an out-of-metro copy cannot claim the key
+                    if not passes_location_gate(location_gate, x):
+                        continue
                     dedup_key = get_dedup_key(x)
                     if dedup_key and dedup_key not in seen_keys:
                         seen_keys.add(dedup_key)

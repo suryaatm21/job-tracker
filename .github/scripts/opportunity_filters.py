@@ -8,12 +8,15 @@ Everything here is deterministic and driven by the JSON files in
 - tag_level: intern vs new grad, from title keywords, else the source's default
 - LocationMatcher: metro matching (SF Bay Area, NYC, LA, Austin, Miami) from config.json
 - metro_subset_matcher: the same matcher over only the named metros (the DM gate)
+- build_location_gate / optional_location_gate: the DM gate from a DM_METROS JSON list
 - parse_pay: posted pay text -> top of range as yearly and hourly USD
 - CompanyTiers: exact-alias company lookup from company_tiers.json
 - is_graduate_only: PhD/MS-only roles (title rules + Simplify's degrees field)
 - RoleGate: drops PM, silicon and non-engineering roles (title terms + board category)
 """
 import html
+import json
+import pathlib
 import re
 
 from job_filtering import requires_graduate_degree
@@ -300,6 +303,40 @@ def metro_subset_matcher(location_config, labels):
     if not labels or unknown:
         raise ValueError(f"metro labels must be a non-empty subset of {sorted(by_label)}; got {labels}")
     return LocationMatcher(location_config, labels)
+
+
+LOCATION_CONFIG_PATH = pathlib.Path(__file__).resolve().parents[1] / "private_channel" / "config.json"
+
+
+def build_location_gate(metros_json):
+    """DM location gate from a DM_METROS JSON list; raises on a missing or invalid value."""
+    if not metros_json:
+        raise ValueError("DM_METROS is not set; the DM watcher will not run without a location gate")
+    try:
+        labels = json.loads(metros_json)
+    except ValueError:
+        labels = None
+    # A JSON object would iterate as its keys and silently pick metros; accept only a list of names
+    if not isinstance(labels, list) or not all(isinstance(label, str) for label in labels):
+        raise ValueError(f"DM_METROS must be a JSON list of metro names, got {metros_json!r}; "
+                         "the DM watcher will not run without a location gate")
+    location_config = json.loads(LOCATION_CONFIG_PATH.read_text(encoding="utf-8"))["location"]
+    return metro_subset_matcher(location_config, labels)
+
+
+def optional_location_gate(metros_json):
+    """
+    build_location_gate when DM_METROS is set, else None (no location gate).
+
+    For the manual latest/today/recent scripts, which the DM workflow runs with
+    DM_METROS set and the channel digests run without it.
+    """
+    return build_location_gate(metros_json) if metros_json else None
+
+
+def passes_location_gate(gate, item):
+    """True when there is no gate or the listing classifies as LOCATION_MATCH (the DM watcher's test)."""
+    return gate is None or gate.classify(item)[0] == LOCATION_MATCH
 
 
 # ---------------------------------------------------------------------------

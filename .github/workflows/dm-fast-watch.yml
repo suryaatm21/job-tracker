@@ -79,7 +79,7 @@ jobs:
         run: |
           test -n "$TELEGRAM_BOT_TOKEN" && test -n "$TELEGRAM_CHAT_ID"
 
-      # Manual commands to your DM. Intentionally not location-gated (DM_METROS applies only to the scheduled watcher); gating them is a tracked follow-up.
+      # Manual commands to your DM. Location-gated like the scheduled watcher: the workflow-level DM_METROS reaches these steps, so only listings in those metros are sent.
       - name: run latest
         if: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.command == 'latest' }}
         env:
