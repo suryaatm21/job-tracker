@@ -40,10 +40,9 @@ def main():
         return 0
 
     if location_gate is not None:
-        metros = ", ".join(m["label"] for m in location_gate.metros)
         data = [x for x in data if passes_location_gate(location_gate, x)]
-        print(f"Location gate (DM_METROS): {len(data)} listings in {metros}")
         if not data:
+            metros = ", ".join(m["label"] for m in location_gate.metros)
             send_telegram(f"{prefix}No listings found in {metros}.")
             return 0
 

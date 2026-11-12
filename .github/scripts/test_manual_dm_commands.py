@@ -64,7 +64,9 @@ def load_script(name, env):
     path = HERE / "manual" / name
     spec = importlib.util.spec_from_file_location(f"manual_{path.stem}", path)
     module = importlib.util.module_from_spec(spec)
-    with mock.patch.dict(os.environ, env):
+    clean = {k: v for k, v in os.environ.items()
+             if k not in ("TARGET_REPOS", "TARGET_REPO", "COUNT", "DM_METROS")}
+    with mock.patch.dict(os.environ, {**clean, **env}, clear=True):
         spec.loader.exec_module(module)
     return module
 
