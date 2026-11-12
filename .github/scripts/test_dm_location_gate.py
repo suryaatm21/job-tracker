@@ -129,6 +129,16 @@ class GateConfiguration(unittest.TestCase):
         with self.assertRaises(ValueError):
             watch_repo.build_location_gate(None)
 
+    def test_dm_metros_that_is_not_a_list_of_names_fails(self):
+        for value in ('{"NYC": false}', '{"SF Bay Area": 1, "NYC": 2}', '5', 'true', '[1]', '[["NYC"]]',
+                      '"NYC"', 'null', 'not json'):
+            with self.subTest(value), self.assertRaisesRegex(ValueError, "DM_METROS"):
+                watch_repo.build_location_gate(value)
+
+    def test_dm_metros_list_builds_the_gate(self):
+        gate = watch_repo.build_location_gate('["SF Bay Area", "NYC"]')
+        self.assertEqual([m["label"] for m in gate.metros], ["SF Bay Area", "NYC"])
+
     def test_unknown_or_empty_label_fails(self):
         for labels in (["SF Bay Area", "Seattle"], []):
             with self.assertRaises(ValueError):
