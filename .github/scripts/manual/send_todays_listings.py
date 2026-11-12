@@ -87,7 +87,6 @@ def to_epoch(v) -> int:
 def main() -> int:
     """Entrypoint: fetch listings from multiple repos, filter those posted today (UTC), and notify."""
     location_gate = optional_location_gate(os.getenv("DM_METROS"))
-    gated_out = set()  # dedup keys, so a listing on both boards counts once
     today = datetime.now(timezone.utc).date()
     all_todays = []
     seen_keys = set()
@@ -118,7 +117,6 @@ def main() -> int:
                 if d == today:
                     # Gate before dedup so an out-of-metro copy cannot claim the key
                     if not passes_location_gate(location_gate, x):
-                        gated_out.add(get_dedup_key(x))
                         continue
                     dedup_key = get_dedup_key(x)
                     if dedup_key and dedup_key not in seen_keys:
@@ -133,10 +131,6 @@ def main() -> int:
         except Exception as e:
             print(f"Error processing repo {repo}: {e}")
             continue
-
-    if location_gate is not None:
-        metros = ", ".join(m["label"] for m in location_gate.metros)
-        print(f"Location gate (DM_METROS): dropped {len(gated_out)} listings outside {metros}")
 
     if not all_todays:
         # No new items today: keep the notification short

@@ -138,7 +138,6 @@ def sort_key(item) -> int:
 
 def main() -> int:
     location_gate = optional_location_gate(os.getenv("DM_METROS"))
-    gated_out = set()  # dedup keys, so a listing on both boards counts once
     all_items = []
     seen_keys = set()
     
@@ -167,7 +166,6 @@ def main() -> int:
                 if sort_key(x) > 0:  # Valid timestamp
                     # Gate before dedup so an out-of-metro copy cannot claim the key
                     if not passes_location_gate(location_gate, x):
-                        gated_out.add(get_dedup_key(x))
                         continue
                     dedup_key = get_dedup_key(x)
                     if dedup_key and dedup_key not in seen_keys:
@@ -182,10 +180,6 @@ def main() -> int:
         except Exception as e:
             print(f"Error processing repo {repo}: {e}")
             continue
-
-    if location_gate is not None:
-        metros = ", ".join(m["label"] for m in location_gate.metros)
-        print(f"Location gate (DM_METROS): dropped {len(gated_out)} listings outside {metros}")
 
     if not all_items:
         send_telegram("No recent listings found.")
