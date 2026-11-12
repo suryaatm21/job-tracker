@@ -7,10 +7,13 @@ posted to one private Telegram chat.
 Pipeline (counts are reported per source and level after every stage):
     fetch -> quality -> window -> location (hard gate)
           -> pay (hard gate, only when the listing states pay)
+          -> role (hard gate: PM, silicon and non-engineering roles drop; see RoleGate)
           -> dedup + TTL state, per listing (see drop_seen_and_duplicates)
           -> score (tiers, Simplify funding profile, posted pay) -> render
 
-Scoring never drops a listing: low scores go to a compact "maybe" section.
+The role gate runs before dedup so a dropped copy of a posting never claims the
+dedup keys of a kept copy from another board. Scoring never drops a listing:
+low scores go to a compact "maybe" section.
 
 Config: .github/private_channel/config.json and company_tiers.json.
 
@@ -45,8 +48,8 @@ from state_utils import (load_seen, save_seen, get_cache_key,
 from telegram_utils import batch_send_message, is_dry_run, safe_join_lines, send_message
 from markdown_listings import parse_markdown_tables
 from opportunity_filters import (tag_level, LocationMatcher, CompanyTiers, normalize_company,
-                                 parse_pay, listing_pay_text, passes_pay_gate,
-                                 LEVELS, LEVEL_NEW_GRAD, LOCATION_MATCH)
+                                 parse_pay, listing_pay_text, passes_pay_gate, RoleGate,
+                                 LEVELS, LEVEL_NEW_GRAD, LOCATION_MATCH, ROLE_REASONS)
 from company_signals import CompanyProfiles, score_listing
 
 CONFIG_DIR = pathlib.Path(os.environ.get("PRIVATE_CONFIG_DIR")
@@ -71,9 +74,9 @@ SEEN_TTL_DAYS = int(os.environ.get("SEEN_TTL_DAYS", "14"))
 DRY_RUN_REPORT = os.environ.get("DRY_RUN_REPORT")
 MAX_TELEGRAM_MESSAGE_CHARS = 3900
 
-LEVEL_TITLES = {LEVEL_NEW_GRAD: "🎓 New Grad", "intern": "🧪 Intern", "unknown": "❔ Level unknown"}
+LEVEL_TITLES = {LEVEL_NEW_GRAD: "🎓 New Grad", "intern": "🧑‍🎓 Intern", "unknown": "❔ Level unknown"}
 
-STAGES = ["fetched", "quality", "window", "location", "pay", "dedup", "ttl"]
+STAGES = ["fetched", "quality", "window", "location", "pay", "role", "dedup", "ttl"]
 
 
 def load_json(name):
@@ -152,8 +155,10 @@ class Funnel:
         self.sources = list(source_names)
         self.counts = {s: {stage: defaultdict(int) for stage in STAGES} for s in self.sources}
         self.drops = defaultdict(lambda: defaultdict(int))  # reason -> level -> n
-        for gate in ("location:elsewhere", "location:remote_only", "location:unknown", "pay:below_floor"):
+        for gate in ("location:elsewhere", "location:remote_only", "location:unknown", "pay:below_floor",
+                     *(f"role:{reason}" for reason in ROLE_REASONS)):
             self.drops[gate]  # hard gates always get a row, even at zero
+        self.role_drops = []  # one record per role-gate drop, for the dry-run report
         self.notes = defaultdict(lambda: defaultdict(int))  # e.g. pay status -> level -> n
         self.errors = {}
         self.skipped = {}
@@ -163,6 +168,12 @@ class Funnel:
 
     def drop(self, reason, item):
         self.drops[reason][item["_level"]] += 1
+
+    def drop_role(self, reason, matched, item):
+        self.drop(f"role:{reason}", item)
+        self.role_drops.append({"reason": reason, "matched": matched, "level": item["_level"],
+                                "source": item["_source"], "category": item.get("category"),
+                                "company": item.get("company_name"), "title": item.get("title")})
 
     def note(self, label, item):
         self.notes[label][item["_level"]] += 1
@@ -325,7 +336,7 @@ def render_level(level, scored, window_hours, strong_threshold, max_strong, max_
         lines.append(f"🤔 <b>Maybe ({len(maybe)})</b>")
         for score, reasons, metros, item in maybe:
             url = html.escape(get_primary_url(item), quote=True)
-            why = f" · <i>{esc(' · '.join(reasons) or 'no company signals found')}</i>"
+            why = f" · <i>{esc(' · '.join(reasons))}</i>" if reasons else ""
             lines.append(f"• {esc(item['company_name'])} — <a href=\"{url}\">{esc(item['title'])}</a>"
                          f" · {esc(' / '.join(metros))}{why}")
     if held_back:
@@ -338,6 +349,8 @@ def main():
     config = load_json("config.json")
     tiers = CompanyTiers(load_json("company_tiers.json"))
     locator = LocationMatcher(config.get("location", {}))
+    role_gate = RoleGate(config.get("role_gate", {}))
+    engineering_only_sources = {s["name"] for s in config.get("sources", []) if s.get("engineering_only")}
     scoring = config.get("scoring", {})
     pay_gate = config.get("pay_gate", {})
     hours_per_year = float(pay_gate.get("hours_per_year", 2080))
@@ -394,6 +407,12 @@ def main():
             funnel.drop("pay:below_floor", item)
             continue
         funnel.keep("pay", item)
+
+        dropped = role_gate.classify(item, item["_source"] in engineering_only_sources)
+        if dropped:
+            funnel.drop_role(*dropped, item)
+            continue
+        funnel.keep("role", item)
         located.append(item)
 
     fresh = drop_seen_and_duplicates(located, seen, SEEN_TTL_DAYS * 86400, now_epoch, funnel)
@@ -476,6 +495,7 @@ def report_dry_run(rendered, funnel, strong_threshold):
     print(funnel.notes_table())
     report = {"funnel": funnel.table(), "drops": funnel.drop_table(), "pay_info": funnel.notes_table(),
               "errors": funnel.errors, "skipped_optional_sources": funnel.skipped,
+              "role_drops": funnel.role_drops,
               "strong_threshold": strong_threshold, "levels": {}}
     for level, header, lines, posted, scored in rendered:
         batches = safe_join_lines(header, lines, MAX_TELEGRAM_MESSAGE_CHARS)

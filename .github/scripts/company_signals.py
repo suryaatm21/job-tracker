@@ -2,8 +2,9 @@
 """
 Company signals and scoring for the private opportunity digest.
 
-Location is the only hard gate; everything here only raises or lowers a
-listing's score and explains why. Signals:
+The hard gates (location, pay floor, role) run earlier, in
+send_private_digest.py; everything here only raises or lowers a listing's
+score and explains why. Signals:
 
 - Company tier lists (company_tiers.json): a fixed boost and label.
 - Simplify company profile (https://simplify.jobs/c/<slug>): funding rounds
@@ -240,12 +241,6 @@ def score_listing(item, level, tier_match, profile, scoring, now_epoch):
     """
     score = 0
     reasons = []
-
-    off_target = scoring.get("off_target_categories", {})
-    category = str(item.get("category") or "").strip()
-    if category and category in off_target.get("categories", []):
-        score += int(off_target.get("points", -3))
-        reasons.append(f"off-target role ({category})")
 
     if tier_match:
         tier, _company = tier_match
