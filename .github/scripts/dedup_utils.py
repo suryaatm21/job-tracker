@@ -22,8 +22,8 @@ def normalize_url(url):
     The one URL key for dedup and the seen memory (see SPEC.md, DEDUP-1 to DEDUP-3):
     lowercase scheme and host, path with each run of slashes cut to one and no
     trailing slash, and the query minus tracking parameters (utm_* and
-    _TRACKING_PARAMS), sorted. The fragment is dropped. Returns None for a blank or unparseable URL, or one with no scheme,
-    host or path.
+    _TRACKING_PARAMS), sorted. The fragment is dropped. Returns None for a blank or
+    unparseable URL, or one with no scheme, host or path.
     """
     url = (url or "").strip()
     if not url:
