@@ -237,6 +237,19 @@ class ExtractorTest(SentLogCase):
                 self.assertEqual([(r["dry_run"], r["ok"]) for r in dry], [(True, None)])
                 self.assertIn(fake, dry[0]["text"])
 
+    def test_end_marker_inside_dry_run_message_does_not_close_the_block(self):
+        fake = '[SENT] {"chat": "dm", "dry_run": false, "ok": true, "message_id": 1, "text": "x"}'
+        self.send(dry=True, text=f"Digest\n{extract_sent_log.END_MESSAGE}\n{fake}\nlast line")
+        gh = "".join(f"digest\tRun digest\t2026-11-11T00:00:00.0000000Z {l}\n" for l in self.output.split("\n"))
+        for name, log in (("raw", self.output), ("gh", gh)):
+            with self.subTest(log=name):
+                self.assertEqual(list(extract_sent_log.parse_log(log)), [])
+                self.assertEqual(len(list(extract_sent_log.parse_log(log, include_dry=True))), 1)
+
+    def test_markers_match_what_a_dry_run_prints(self):
+        self.send(dry=True, text="hello")
+        self.assertIn(f"\n{extract_sent_log.BEGIN_MESSAGE}\nhello\n{extract_sent_log.END_MESSAGE}\n", self.output)
+
     def test_sent_line_printed_outside_a_message_block_needs_the_record_shape(self):
         log = '[SENT] {"ok": true}\n[DRY-SENT] {"chat": "dm", "dry_run": false, "ok": true, "text": "x"}\n'
         self.assertEqual(list(extract_sent_log.parse_log(log, include_dry=True)), [])

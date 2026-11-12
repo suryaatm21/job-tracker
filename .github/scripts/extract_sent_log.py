@@ -21,7 +21,7 @@ import json
 import re
 import subprocess
 import sys
-from typing import Iterable, Iterator, List, Optional
+from typing import Iterable, Iterator, List, Optional, Tuple
 
 # Matches anywhere in the line: gh prefixes each log line with "job<TAB>step<TAB>timestamp ".
 # The literal "] " after the tag keeps "[SENT-SUMMARY]" lines out.
@@ -32,37 +32,68 @@ BEGIN_MESSAGE = "----- BEGIN MESSAGE -----"
 END_MESSAGE = "----- END MESSAGE -----"
 
 
+def _decode(line: str) -> Optional[Tuple[bool, Optional[dict]]]:
+    """(dry, record) for a tagged line; record is None when it is not a well-formed sent record.
+
+    None for a line with no record tag.
+    """
+    match = RECORD_RE.search(line)
+    if not match:
+        return None
+    dry = match.group(1) == "DRY-SENT"
+    try:
+        record = json.loads(match.group(2))
+    except ValueError:
+        return dry, None
+    if not isinstance(record, dict) or record.get("dry_run") is not dry or not isinstance(record.get("text"), str):
+        return dry, None
+    return dry, record
+
+
+def _block_end(lines: List[str], begin: int) -> int:
+    """Index of the line closing the dry-run message block that opens at lines[begin].
+
+    The block closes at the END marker followed by the [DRY-SENT] record whose
+    text is exactly the lines in between, so message text holding its own END
+    marker cannot close it early. Without such a record (an edited or cut log)
+    the first END marker closes it, or the log's end.
+    """
+    first_end = None
+    for j in range(begin + 1, len(lines)):
+        if not lines[j].rstrip().endswith(END_MESSAGE):
+            continue
+        first_end = j if first_end is None else first_end
+        decoded = _decode(lines[j + 1]) if j + 1 < len(lines) else None
+        if decoded and decoded[0] and decoded[1]:
+            body = decoded[1]["text"].split("\n")
+            shown = lines[begin + 1:j]
+            if len(body) == len(shown) and all(l.endswith(b) for l, b in zip(shown, body)):
+                return j
+    return first_end if first_end is not None else len(lines) - 1
+
+
 def parse_log(text: str, include_dry: bool = False) -> Iterator[dict]:
     """Yield each sent-message record found in a run log.
 
-    Lines inside a dry run's readable message block are skipped, and a match
-    counts only when it decodes to a record whose dry_run flag agrees with its tag.
+    Lines inside a dry run's readable message block are skipped, and a tagged
+    line counts only when it decodes to a record whose dry_run flag agrees with its tag.
     """
-    in_message = False
     # Split on "\n" only: str.splitlines() also breaks on U+2028 and friends.
-    for line in text.split("\n"):
-        tail = line.rstrip()
-        if in_message:
-            in_message = not tail.endswith(END_MESSAGE)
+    lines = text.split("\n")
+    i = 0
+    while i < len(lines):
+        line = lines[i]
+        if line.rstrip().endswith(BEGIN_MESSAGE):
+            i = _block_end(lines, i) + 1
             continue
-        if tail.endswith(BEGIN_MESSAGE):
-            in_message = True
+        i += 1
+        decoded = _decode(line)
+        if decoded is None or (decoded[0] and not include_dry):
             continue
-        match = RECORD_RE.search(line)
-        if not match:
-            continue
-        dry = match.group(1) == "DRY-SENT"
-        if dry and not include_dry:
-            continue
-        try:
-            record = json.loads(match.group(2))
-        except ValueError:
-            print(f"[extract] skipped unparseable record: {line[:120]}", file=sys.stderr)
-            continue
-        if not isinstance(record, dict) or record.get("dry_run") is not dry or "text" not in record:
+        if decoded[1] is None:
             print(f"[extract] skipped line that is not a sent record: {line[:120]}", file=sys.stderr)
             continue
-        yield record
+        yield decoded[1]
 
 
 def _gh(args: List[str]) -> Optional[str]:

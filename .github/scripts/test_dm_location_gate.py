@@ -182,6 +182,11 @@ class ExplicitStateTest(unittest.TestCase):
             with self.subTest(location=location):
                 self.assertEqual(self.GATE.classify({"locations": [location]}), ("match", ["SF Bay Area"]))
 
+    def test_subset_keeps_the_order_of_its_labels(self):
+        gate = metro_subset_matcher(LOCATION_CONFIG, ["NYC", "SF Bay Area"])
+        self.assertEqual([m["label"] for m in gate.metros], ["NYC", "SF Bay Area"])
+        self.assertEqual(gate.classify({"locations": ["SF/NYC"]}), ("match", ["NYC", "SF Bay Area"]))
+
     def test_dm_state_label_honors_a_spelled_out_state(self):
         from format_utils import format_location
         self.assertEqual(format_location(["Mountain View, Hawaii", "New York, NY"], "dm"), "New York")

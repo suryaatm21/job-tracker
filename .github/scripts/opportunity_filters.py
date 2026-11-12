@@ -167,10 +167,12 @@ class LocationMatcher:
         self.place_names = {name.lower() for metro in config.get("metros", [])
                             for key in ("cities", "cities_needing_state", "bare_names")
                             for name in metro.get(key, [])}
+        metros = config.get("metros", [])
+        if labels is not None:
+            by_label = {metro["label"]: metro for metro in metros}
+            metros = [by_label[label] for label in labels]
         self.metros = []
-        for metro in config.get("metros", []):
-            if labels is not None and metro["label"] not in labels:
-                continue
+        for metro in metros:
             tokens = {t.lower() for t in metro.get("state_tokens", [])}
             state = max(tokens, key=len).title() if tokens else None
             self.metros.append({
