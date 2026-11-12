@@ -477,6 +477,8 @@ class RoleGateTest(unittest.TestCase):
             for category in (None, "Software", "Security Engineering", "Other Jobs"):
                 with self.subTest(title=title, category=category):
                     self.assertEqual(self.classify(title, category), (ROLE_NON_ENGINEERING, "officer"))
+        for category in (None, "Software"):
+            self.assertEqual(self.classify("Security Officers", category)[0], ROLE_NON_ENGINEERING)
         for title in ["Security Engineer Intern", "Security Analyst Intern"]:
             with self.subTest(title=title):
                 self.assertIsNone(self.classify(title))
