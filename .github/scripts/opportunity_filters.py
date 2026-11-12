@@ -11,6 +11,7 @@ Everything here is deterministic and driven by the JSON files in
 - parse_pay: posted pay text -> top of range as yearly and hourly USD
 - CompanyTiers: exact-alias company lookup from company_tiers.json
 - is_graduate_only: PhD/MS-only roles (title rules + Simplify's degrees field)
+- RoleGate: drops PM, silicon and non-engineering roles (title terms + board category)
 """
 import html
 import re
@@ -400,3 +401,100 @@ class CompanyTiers:
     def match(self, company_name):
         """Return (tier_dict, company_dict) or None."""
         return self._index.get(normalize_company(company_name))
+
+
+# ---------------------------------------------------------------------------
+# Role gate
+# ---------------------------------------------------------------------------
+
+ROLE_PM = "pm"
+ROLE_SILICON = "silicon"
+ROLE_NON_ENGINEERING = "non_engineering"
+ROLE_REASONS = (ROLE_PM, ROLE_SILICON, ROLE_NON_ENGINEERING)
+
+
+def _norm_role_text(text):
+    """Lowercase words separated by single spaces: "Post-Silicon R&D" -> "post silicon r d"."""
+    text = html.unescape(str(text or "")).lower()
+    return " ".join(re.sub(r"[^a-z0-9]+", " ", text).split())
+
+
+def _phrase_re(terms):
+    """One regex matching any of the normalized terms as whole words, longest first."""
+    phrases = sorted({_norm_role_text(t) for t in terms if _norm_role_text(t)}, key=len, reverse=True)
+    if not phrases:
+        return None
+    return re.compile(r"(?<!\S)(?:" + "|".join(re.escape(p) for p in phrases) + r")(?!\S)")
+
+
+class RoleGate:
+    """
+    Hard gate on the kind of work a listing is, from its title and board category.
+
+    classify(item) returns (reason, matched) for a listing to drop, where reason
+    is ROLE_PM, ROLE_SILICON or ROLE_NON_ENGINEERING and matched names the term
+    or category that decided it, or None to keep the listing. Terms match whole
+    words after both sides are normalized ("Post-Silicon" -> "post silicon", so
+    "silicon" catches it; "sales" never catches "Salesforce"). Order:
+
+    1. A PM title term drops, even with "technical" or "engineer" in the title.
+    2. A silicon title term drops, even when the title says Engineer.
+    3. A PM board category drops unless the title names engineering work
+       ("Product Engineer"); "Recipe Developer" in Simplify's Product bucket drops.
+    4. A non-engineering board category drops.
+    5. A non-engineering title term drops when the rest of the title, with those
+       terms cut out, names no engineering/research work: "Technology Operations
+       Intern" drops, "Software Engineer, Supply Chain" stays. Multi-word terms
+       such as "sales engineer" are cut out whole, so they drop too.
+    6. Otherwise a title term or board category must mark the listing as
+       engineering or research; listings with neither drop.
+    Categories compare exactly, case-folded.
+    """
+
+    def __init__(self, config):
+        config = config or {}
+        pm = config.get("pm", {})
+        silicon = config.get("silicon", {})
+        non_eng = config.get("non_engineering", {})
+        eng = config.get("engineering", {})
+        fold = lambda names: {str(n).strip().casefold() for n in names}
+        self.pm_title = _phrase_re(pm.get("title_terms", []))
+        self.pm_categories = fold(pm.get("categories", []))
+        self.pm_category_rescue = _phrase_re(pm.get("category_kept_when_title_has", []))
+        self.silicon_title = _phrase_re(silicon.get("title_terms", []))
+        self.silicon_ignore = _phrase_re(silicon.get("ignore_phrases", []))
+        self.non_eng_title = _phrase_re(non_eng.get("title_terms", []))
+        self.non_eng_categories = fold(non_eng.get("categories", []))
+        self.eng_title = _phrase_re(eng.get("title_terms", []))
+        self.eng_categories = fold(eng.get("categories", []))
+
+    @staticmethod
+    def _find(pattern, text):
+        m = pattern.search(text) if pattern else None
+        return m.group(0) if m else None
+
+    def classify(self, item):
+        title = _norm_role_text(item.get("title"))
+        category = str(item.get("category") or "").strip().casefold()
+
+        term = self._find(self.pm_title, title)
+        if term:
+            return ROLE_PM, term
+        silicon_text = self.silicon_ignore.sub(" ", title) if self.silicon_ignore else title
+        term = self._find(self.silicon_title, silicon_text)
+        if term:
+            return ROLE_SILICON, term
+        if category in self.pm_categories and not self._find(self.pm_category_rescue, title):
+            return ROLE_PM, f"category: {item.get('category')}"
+        if category in self.non_eng_categories:
+            return ROLE_NON_ENGINEERING, f"category: {item.get('category')}"
+
+        non_eng = self._find(self.non_eng_title, title)
+        rest = self.non_eng_title.sub(" ", title) if non_eng else title
+        if self._find(self.eng_title, rest):
+            return None
+        if non_eng:
+            return ROLE_NON_ENGINEERING, non_eng
+        if category in self.eng_categories:
+            return None
+        return ROLE_NON_ENGINEERING, "no engineering/research term"

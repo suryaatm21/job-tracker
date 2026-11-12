@@ -21,7 +21,8 @@ import send_private_digest as digest
 from company_signals import CompanyProfiles, parse_simplify_company_page, score_listing, guess_simplify_slug
 from markdown_listings import parse_markdown_tables, approximate_posted_epoch
 from opportunity_filters import (LocationMatcher, CompanyTiers, tag_level, normalize_company, parse_pay,
-                                 passes_pay_gate, is_graduate_only, LEVEL_INTERN, LEVEL_NEW_GRAD,
+                                 passes_pay_gate, is_graduate_only, RoleGate, ROLE_PM, ROLE_SILICON,
+                                 ROLE_NON_ENGINEERING, LEVEL_INTERN, LEVEL_NEW_GRAD,
                                  LEVEL_UNKNOWN, LOCATION_MATCH, LOCATION_REMOTE, LOCATION_UNKNOWN,
                                  LOCATION_ELSEWHERE, PAY_OK, PAY_NONE, PAY_UNPARSED)
 
@@ -268,9 +269,9 @@ class ScoringTest(unittest.TestCase):
         score, reasons = score_listing({"title": "Research Intern - PhD"}, LEVEL_INTERN, tier, None, self.scoring, NOW)
         self.assertLess(score, self.scoring["strong_threshold"])
         self.assertIn("PhD/MS only", reasons)
-        score, reasons = score_listing({"title": "Account Executive", "category": "Business & Operations"},
-                                       LEVEL_NEW_GRAD, None, None, self.scoring, NOW)
-        self.assertEqual(score, -3)
+        # Board category no longer scores: the role gate drops off-target roles before scoring
+        self.assertEqual(score_listing({"title": "SWE", "category": "Business & Operations"},
+                                       LEVEL_NEW_GRAD, None, None, self.scoring, NOW), (0, []))
         _, reasons = score_listing({"title": "SWE", "salary": "competitive"}, LEVEL_NEW_GRAD, None, None, self.scoring, NOW)
         self.assertEqual(reasons, ["pay unparsed: competitive"])
 
@@ -309,7 +310,96 @@ class CompanyProfilesTest(unittest.TestCase):
         self.assertEqual(profiles.lookup({"company_name": "Second"}), (None, profiles.PROFILE_DEFERRED))
 
 
+class RoleGateTest(unittest.TestCase):
+    """The role gate runs on config.json's own lists, so these cases also pin the shipped keywords."""
+
+    gate = RoleGate(CONFIG["role_gate"])
+
+    def classify(self, title, category=None):
+        return self.gate.classify({"title": title, "category": category})
+
+    def test_listings_from_the_scheduled_runs_drop_with_the_right_reason(self):
+        # (company, title, the board's category for it, reason)
+        cases = [
+            ("Perplexity", "Product Manager", "Software Engineering", ROLE_PM),
+            ("Rubrik", "Product Manager Intern - Managed Service Provider", "Product", ROLE_PM),
+            ("Anthropic", "Technical Program Manager, External Evaluators", "Other Jobs", ROLE_PM),
+            ("Motorola Solutions", "Program Manager", None, ROLE_PM),
+            ("Salesforce", "Program Manager", "Software Engineering", ROLE_PM),
+            ("Amazon", "Post-Silicon Systems Validation Engineer I", "Hardware", ROLE_SILICON),
+            ("Lightmatter", "Supply Chain Internship - Summer 2027", "Business & Operations", ROLE_NON_ENGINEERING),
+            ("Amgen", "Grad Intern - Operations - Process Development", None, ROLE_NON_ENGINEERING),
+            ("Arcesium", "Technology Operations Intern", "Software", ROLE_NON_ENGINEERING),
+            ("Ramp", "Risk Operations Specialist, Onboarding", "Business & Operations", ROLE_NON_ENGINEERING),
+            ("Wells Fargo", "Branch Operations Coordinator", "Business & Operations", ROLE_NON_ENGINEERING),
+            ("Nike", "Retail Marketing Intern", None, ROLE_NON_ENGINEERING),
+            ("Parspec", "Product Marketing Manager Intern", "Other Jobs", ROLE_NON_ENGINEERING),
+            ("Critical Mass", "Marketing Science Associate Analyst", "AI/ML/Data", ROLE_NON_ENGINEERING),
+        ]
+        for company, title, category, reason in cases:
+            with self.subTest(company=company, title=title):
+                result = self.classify(title, category)
+                self.assertIsNotNone(result)
+                self.assertEqual(result[0], reason)
+                # Title rules alone decide these too, wherever the listing comes from
+                if category not in ("Business & Operations", "Other Jobs", "Product"):
+                    self.assertEqual(self.classify(title)[0], reason)
+
+    def test_engineering_and_research_titles_stay(self):
+        for title in ["Software Engineer Intern", "Machine Learning Engineer, New Grad", "Research Scientist Intern",
+                      "Product Engineer", "Applications Engineer", "Salesforce Developer",
+                      "Software Engineer, Supply Chain", "Business Intelligence Engineer", "Member of Technical Staff",
+                      "Software Engineer - Silicon Valley", "Applied AI Engineer - Non-Silicon",
+                      "Operations Research Scientist", "Full-Stack Intern", "FPGA Design Intern"]:
+            for category in (None, "Software"):
+                with self.subTest(title=title, category=category):
+                    self.assertIsNone(self.classify(title, category))
+
+    def test_whole_word_matching(self):
+        self.assertIsNone(self.classify("Salesforce Developer"))       # not "sales"
+        self.assertIsNone(self.classify("DevOps Engineer"))            # not "ops"
+        self.assertIsNone(self.classify("Applications Engineer"))      # not a PM term
+        self.assertEqual(self.classify("Sales Ops Analyst")[0], ROLE_NON_ENGINEERING)
+
+    def test_pm_and_silicon_drop_even_when_titled_engineer(self):
+        self.assertEqual(self.classify("Product Management Engineer Intern", "Software"), (ROLE_PM, "product management"))
+        self.assertEqual(self.classify("Associate Product Manager")[0], ROLE_PM)
+        self.assertEqual(self.classify("APM Intern")[0], ROLE_PM)
+        for title in ["ASIC Design Engineer", "RTL Design Engineer", "VLSI Engineer Intern", "Pre-Silicon Validation Engineer",
+                      "CPU Design Verification Engineer Intern", "Physical Design Engineer", "DFT Engineer New Grad"]:
+            with self.subTest(title=title):
+                self.assertEqual(self.classify(title, "Hardware")[0], ROLE_SILICON)
+        self.assertIsNone(self.classify("Hardware Engineer Intern", "Hardware"))  # other hardware stays
+
+    def test_categories(self):
+        # Simplify's Product bucket drops unless the title names engineering work
+        self.assertEqual(self.classify("Recipe Developer", "Product"), (ROLE_PM, "category: Product"))
+        self.assertIsNone(self.classify("Product Engineer", "Product"))
+        # zapply's non-engineering sections drop whatever the title says
+        self.assertEqual(self.classify("Data Engineer", "Other Jobs"), (ROLE_NON_ENGINEERING, "category: Other Jobs"))
+        # An engineering category keeps a bare title; no category and no term drops
+        self.assertIsNone(self.classify("Summer 2027 Intern", "AI/ML/Data"))
+        self.assertEqual(self.classify("Summer 2027 Intern"), (ROLE_NON_ENGINEERING, "no engineering/research term"))
+        # speedyapply's sections group companies, so the title decides
+        self.assertEqual(self.classify("Customer Experience Coordinator", "FAANG+")[0], ROLE_NON_ENGINEERING)
+
+    def test_multiword_non_engineering_terms_win_over_their_own_words(self):
+        self.assertEqual(self.classify("Sales Engineer"), (ROLE_NON_ENGINEERING, "sales engineer"))
+        self.assertEqual(self.classify("Quantitative Trader", "Quant")[0], ROLE_NON_ENGINEERING)
+        self.assertIsNone(self.classify("Quantitative Researcher", "Quant"))
+
+
 class RenderTest(unittest.TestCase):
+    def test_listing_without_reasons_has_no_placeholder(self):
+        item = {"company_name": "Acme", "title": "Software Engineer", "url": "https://x.test/1"}
+        header, lines, _ = digest.render_level(LEVEL_INTERN, [(0, [], ["NYC"], item)], 48, 3, 40, 25)
+        line = next(l for l in lines if "Acme" in l)
+        self.assertTrue(line.endswith("NYC"), line)
+        self.assertNotIn("signals", line)
+        self.assertNotIn("<i>", line)
+        self.assertIn("🧑‍🎓 Intern", header)
+        self.assertNotIn("🧪", header)
+
     def test_html_is_escaped_and_overflow_counted(self):
         item = {"company_name": "M&T <Bank>", "title": "Data & API <Eng>", "url": "https://x.test/a?b=1&c=2"}
         scored = [(5, ["tier: big tech"], ["NYC"], item), (0, [], ["NYC"], dict(item)), (0, [], ["NYC"], dict(item))]
@@ -545,6 +635,33 @@ class DigestRunTest(unittest.TestCase):
         self.assertIn("tier: promising startup", levels["new_grad"]["scored"][0]["reasons"])
         self.assertIn("instagram:zero2sudo | new_grad | 2 | 2 | 2 | 1", report["funnel"])
         self.assertFalse((self.tmp / "state" / "seen.json").exists())  # dry run never writes seen state
+
+    def test_role_gate_drops_every_level_and_is_counted(self):
+        extra = [("Rubrik", "Product Manager Intern", "intern"),
+                 ("Amazon", "Post-Silicon Systems Validation Engineer I", "new grad"),
+                 ("Ramp", "Risk Operations Specialist", None),  # level unknown: still gated
+                 ("Wells Fargo", "Branch Operations Coordinator", None)]
+        for i, (company, title, level) in enumerate(extra):
+            entry = {"source": "instagram:zero2sudo", "company_name": company, "title": title,
+                     "url": f"https://jobs.example.com/role/{i}", "locations": ["New York, NY"],
+                     "date_posted": self.feed[0]["date_posted"], "active": True}
+            if level:
+                entry["level"] = level
+            self.feed.append(entry)
+        ok, _ = self.run_digest(file_exists=True)
+        self.assertTrue(ok)
+        report = json.loads(self.report.read_text())
+        self.assertIn("role:pm | 0 | 1 | 0", report["drops"])
+        self.assertIn("role:silicon | 1 | 0 | 0", report["drops"])
+        self.assertIn("role:non_engineering | 0 | 0 | 2", report["drops"])
+        self.assertEqual(sorted((d["reason"], d["company"]) for d in report["role_drops"]),
+                         [("non_engineering", "Ramp"), ("non_engineering", "Wells Fargo"),
+                          ("pm", "Rubrik"), ("silicon", "Amazon")])
+        posted = {s["company"] for level in report["levels"].values() for s in level["scored"]}
+        self.assertEqual(posted, {"Stripe", "Notion", "Some Seed Startup"})
+        text = "\n".join(m for level in report["levels"].values() for m in level["messages"])
+        self.assertIn("🧑‍🎓 Intern", text)
+        self.assertNotIn("no company signals found", text)
 
     def test_missing_feed_is_skipped_quietly(self):
         ok, fake = self.run_digest(file_exists=False)

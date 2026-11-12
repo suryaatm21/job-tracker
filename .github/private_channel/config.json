@@ -1,5 +1,5 @@
 {
-  "_about": "Private opportunity digest (send_private_digest.py). Hard gates: location (metros below) and, only when a listing states pay, the pay floor. Scoring then decides 'strong signal' vs 'maybe'; it never drops a listing. Company tiers live in company_tiers.json.",
+  "_about": "Private opportunity digest (send_private_digest.py). Hard gates: location (metros below); only when a listing states pay, the pay floor; then the role gate (role_gate below), which drops PM, silicon and non-engineering roles. Scoring then decides 'strong signal' vs 'maybe' among what is left; it never drops a listing. Company tiers live in company_tiers.json.",
 
   "sources": [
     {"name": "SimplifyJobs/New-Grad-Positions", "type": "listings_json", "repo": "SimplifyJobs/New-Grad-Positions", "level": "new_grad"},
@@ -85,14 +85,52 @@
     "hours_per_year": 2080
   },
 
+  "role_gate": {
+    "_about": "Hard gate on the kind of work (opportunity_filters.RoleGate has the order). Terms match whole words after lowercasing and turning punctuation into spaces, so 'Post-Silicon' matches 'silicon' and 'sales' never matches 'Salesforce'. Categories are the boards' own labels, compared exactly: Simplify's category field and zapply's section headings. speedyapply's sections (FAANG+, Quant, Other) group companies, not roles; its 'Quant' shares Simplify's label, which is harmless because that board lists only SWE roles.",
+    "pm": {
+      "_about": "PM titles drop even when they say technical or engineering. The Product categories drop unless the title has one of category_kept_when_title_has ('Product Engineer' stays).",
+      "title_terms": ["product manager", "product managers", "product management", "associate product manager", "apm", "program manager", "program managers", "program management", "technical program manager", "tpm", "project manager", "project managers", "project management", "product owner"],
+      "categories": ["Product", "Product Management"],
+      "category_kept_when_title_has": ["engineer", "engineers", "engineering", "scientist", "software"]
+    },
+    "silicon": {
+      "_about": "Chip-design work, dropped even when titled Engineer. Other hardware engineering stays.",
+      "title_terms": ["silicon", "asic", "rtl", "vlsi", "design verification", "physical design", "dft", "design for test", "design for testability", "chip design", "ic design"],
+      "ignore_phrases": ["silicon valley", "non silicon"]
+    },
+    "non_engineering": {
+      "_about": "A title term drops the listing unless the title, with these terms cut out, still has an engineering title term ('Software Engineer, Supply Chain' stays; 'sales engineer' is cut out whole, so it drops). The categories drop whatever the title says.",
+      "categories": ["Business & Operations", "Other Jobs"],
+      "title_terms": [
+        "business", "business development", "operations", "ops", "strategy", "consulting", "consultant", "coordinator", "administrative",
+        "supply chain", "logistics", "procurement", "sourcing", "purchasing", "buyer", "merchandising", "retail", "store", "branch",
+        "talent", "recruiting", "recruiter", "recruitment", "human resources", "hr",
+        "marketing", "market research", "brand", "communications", "public relations", "content", "social media",
+        "sales", "sales engineer", "account executive", "account manager", "customer success",
+        "finance", "financial", "accounting", "accountant", "audit", "tax", "treasury", "banking", "banker", "investment banking",
+        "trader", "trading", "underwriter", "underwriting", "actuarial", "claims", "risk",
+        "legal", "counsel", "paralegal", "attorney", "compliance",
+        "nurse", "nursing", "pharmacist", "real estate", "facilities"
+      ]
+    },
+    "engineering": {
+      "_about": "A listing must have one of these title terms or categories. Trading titles are not research: 'Quantitative Trader' drops via 'trader'.",
+      "categories": ["Software", "Software Engineering", "AI/ML/Data", "Data Science, AI & Machine Learning", "Quant", "Quantitative Finance", "Hardware", "Hardware & Systems Engineering", "Security Engineering", "Data, AI & Research"],
+      "title_terms": [
+        "engineer", "engineers", "engineering", "developer", "developers", "software", "programmer", "swe", "sde", "technical staff",
+        "machine learning", "ml", "ai", "artificial intelligence", "deep learning", "computer vision", "nlp", "llm",
+        "data science", "data scientist", "scientist", "scientists", "research", "researcher", "researchers", "r&d",
+        "quant research", "quant researcher", "quantitative research", "quantitative researcher", "quant developer", "quantitative developer",
+        "devops", "devsecops", "mlops", "sre", "site reliability", "firmware", "embedded", "fpga", "robotics", "security", "cybersecurity",
+        "computer science", "programming", "full stack", "fullstack", "frontend", "backend", "sdet", "applied science",
+        "web development", "application development", "software development", "system development", "systems development"
+      ]
+    }
+  },
+
   "scoring": {
     "strong_threshold": 3,
     "graduate_only_points": -6,
-    "off_target_categories": {
-      "_about": "Board sections that are not engineering/product roles (zapply's README mixes in sales, nursing, legal). Exact section names; speedyapply's 'Other' means 'other companies' and is not listed.",
-      "categories": ["Business & Operations", "Other Jobs"],
-      "points": -3
-    },
     "funding": {
       "_about": "From each company's Simplify profile. Equity rounds only (debt, grants, secondaries and post-IPO rounds do not count); public companies get no funding points.",
       "equity_round_prefixes": ["PRE_SEED", "SEED", "ANGEL", "SERIES_", "EARLY_VC", "LATE_VC", "GROWTH_EQUITY", "CONVERTIBLE", "CORPORATE_ROUND"],
