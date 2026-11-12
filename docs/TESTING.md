@@ -121,7 +121,7 @@ Ensure GitHub repository secrets are configured:
 
 ### 6. Private Job Tracker Digest
 
-**Offline tests** (no network, no Telegram; covers the markdown reader, location and pay gates, tiers, scoring, the Simplify profile cache, and Supra's Instagram feed including the missing-file case):
+**Offline tests** (no network, no Telegram; covers the markdown reader, location, pay and role gates, tiers, scoring, the Simplify profile cache, and Supra's Instagram feed including the missing-file case):
 
 ```bash
 python -m unittest discover -s .github/scripts -p 'test_private_digest.py'
