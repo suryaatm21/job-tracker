@@ -427,6 +427,8 @@ class RoleGateTest(unittest.TestCase):
 
     def test_multiword_non_engineering_terms_win_over_their_own_words(self):
         self.assertEqual(self.classify("Sales Engineer"), (ROLE_NON_ENGINEERING, "sales engineer"))
+        self.assertEqual(self.classify("Sales Engineer Intern")[0], ROLE_NON_ENGINEERING)
+        self.assertEqual(self.classify("Sales Engineering Intern"), (ROLE_NON_ENGINEERING, "sales engineering"))
         self.assertEqual(self.classify("Quantitative Trader", "Quant")[0], ROLE_NON_ENGINEERING)
         self.assertIsNone(self.classify("Quantitative Researcher", "Quant"))
 
