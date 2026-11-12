@@ -5,7 +5,7 @@ Private opportunity digest: new grad + intern listings in the configured metros
 posted to one private Telegram chat.
 
 Pipeline (counts are reported per source and level after every stage):
-    fetch -> quality -> window -> location (hard gate)
+    fetch -> quality -> window -> location (hard gate; see location_outcome)
           -> pay (hard gate, only when the listing states pay)
           -> role (hard gate: PM, silicon and non-engineering roles drop; see RoleGate)
           -> dedup + TTL state, per listing (see drop_seen_and_duplicates)
@@ -307,6 +307,21 @@ def drop_seen_and_duplicates(items, seen, ttl_seconds, now_epoch, funnel):
     return kept
 
 
+def location_outcome(item, locator, missing_location_labels):
+    """
+    (outcome, metros, display) for the location gate. A listing with no
+    locations at all, from a source that sets "missing_location_label", passes
+    with no metros and shows that label in place of the metro list; without
+    metros its dedup falls back to the URL key. Any other listing, including one
+    from that source that does state a location, goes through the LocationMatcher.
+    """
+    label = missing_location_labels.get(item["_source"])
+    if label and not item.get("locations"):
+        return LOCATION_MATCH, [], [label]
+    outcome, metros = locator.classify(item)
+    return outcome, metros, metros
+
+
 def render_level(level, scored, window_hours, strong_threshold, max_strong, max_maybe):
     """
     Header and lines for one level. scored: [(score, reasons, metros, item)]
@@ -351,6 +366,8 @@ def main():
     locator = LocationMatcher(config.get("location", {}))
     role_gate = RoleGate(config.get("role_gate", {}))
     engineering_only_sources = {s["name"] for s in config.get("sources", []) if s.get("engineering_only")}
+    missing_location_labels = {s["name"]: s["missing_location_label"]
+                               for s in config.get("sources", []) if s.get("missing_location_label")}
     scoring = config.get("scoring", {})
     pay_gate = config.get("pay_gate", {})
     hours_per_year = float(pay_gate.get("hours_per_year", 2080))
@@ -393,11 +410,11 @@ def main():
         item["_timestamp"] = ts
         funnel.keep("window", item)
 
-        outcome, metros = locator.classify(item)
+        outcome, metros, display = location_outcome(item, locator, missing_location_labels)
         if outcome != LOCATION_MATCH:
             funnel.drop(f"location:{outcome}", item)
             continue
-        item["_metros"] = metros
+        item["_metros"], item["_location_display"] = metros, display
         funnel.keep("location", item)
 
         pay = parse_pay(listing_pay_text(item), hours_per_year)
@@ -432,7 +449,7 @@ def main():
                 funnel.note("deferred:profile_lookup_budget", kept)
                 continue
         score, reasons = score_listing(kept, kept["_level"], tier_match, profile, scoring, now_epoch)
-        by_level[kept["_level"]].append((score, reasons, kept["_metros"], kept))
+        by_level[kept["_level"]].append((score, reasons, kept["_location_display"], kept))
 
     rendered = []
     for level in LEVELS:

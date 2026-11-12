@@ -41,5 +41,16 @@
     "active": true,
     "category": "Software",
     "level": "new grad"
+  },
+  {
+    "source": "instagram:zero2sudo",
+    "company_name": "Unlisted Labs",
+    "title": "Software Engineer, New Grad",
+    "url": "https://jobs.example.com/unlisted/5555555",
+    "locations": [],
+    "date_posted": 0,
+    "active": true,
+    "category": "Software",
+    "level": "new grad"
   }
 ]

@@ -166,6 +166,39 @@ class LocationTest(unittest.TestCase):
         self.assertEqual(LocationMatcher(cfg).classify({"locations": ["Remote in USA"]}), (LOCATION_MATCH, ["Remote"]))
 
 
+class SourceLocationLabelTest(unittest.TestCase):
+    LOCATOR = LocationMatcher(CONFIG["location"])
+    LABELS = {"feed": "sudo"}
+
+    def outcome(self, source, **fields):
+        return digest.location_outcome({"_source": source, **fields}, self.LOCATOR, self.LABELS)
+
+    def test_only_a_labelled_source_without_locations_passes(self):
+        self.assertEqual(self.outcome("feed", locations=[]), (LOCATION_MATCH, [], ["sudo"]))
+        self.assertEqual(self.outcome("feed"), (LOCATION_MATCH, [], ["sudo"]))
+        self.assertEqual(self.outcome("feed", locations=None), (LOCATION_MATCH, [], ["sudo"]))
+        self.assertEqual(self.outcome("board", locations=[]), (LOCATION_UNKNOWN, [], []))
+        self.assertEqual(self.outcome("board"), (LOCATION_UNKNOWN, [], []))
+
+    def test_labelled_source_with_locations_uses_the_normal_gate(self):
+        self.assertEqual(self.outcome("feed", locations=["New York, NY"]), (LOCATION_MATCH, ["NYC"], ["NYC"]))
+        self.assertEqual(self.outcome("feed", locations=["Seattle, WA"]), (LOCATION_ELSEWHERE, [], []))
+        self.assertEqual(self.outcome("feed", locations=["Remote"]), (LOCATION_REMOTE, [], []))
+        self.assertEqual(self.outcome("feed", locations=["TBD"]), (LOCATION_UNKNOWN, [], []))
+
+    def test_labelled_listing_dedups_on_url_only(self):
+        item = {"_source": "feed", "_level": LEVEL_NEW_GRAD, "_metros": [], "company_name": "Acme",
+                "title": "Software Engineer", "url": "https://jobs.example.com/acme/1"}
+        url_keys, metro_keys = digest.listing_keys(item)
+        self.assertEqual(metro_keys, [])
+        self.assertEqual(url_keys, [digest.normalize_url(item["url"])])
+        copy = {**item, "url": "https://jobs.example.com/acme/2"}  # same title, other URL: no shared key
+        funnel = digest.Funnel(["feed"])
+        kept = digest.drop_seen_and_duplicates([item, copy, dict(item)], {}, 86400, NOW, funnel)
+        self.assertEqual([k["url"] for k in kept], [item["url"], copy["url"]])
+        self.assertEqual(funnel.drops["dedup:url"][LEVEL_NEW_GRAD], 1)
+
+
 class PayTest(unittest.TestCase):
     def test_formats(self):
         cases = {
@@ -673,11 +706,12 @@ class DigestRunTest(unittest.TestCase):
         self.assertEqual(fake.probes[0], ("Supra16/JobTracker", "feed/listings.json"))
         report = json.loads(self.report.read_text())
         levels = report["levels"]
-        self.assertEqual([s["company"] for s in levels["new_grad"]["scored"]], ["Stripe"])  # Seattle dropped
+        # Seattle dropped; the listing with no locations posts under the source's label
+        self.assertEqual([s["company"] for s in levels["new_grad"]["scored"]], ["Stripe", "Unlisted Labs"])
         self.assertEqual([s["company"] for s in levels["intern"]["scored"]], ["Notion"])    # level from title
         self.assertEqual([s["company"] for s in levels["unknown"]["scored"]], ["Some Seed Startup"])
         self.assertIn("tier: promising startup", levels["new_grad"]["scored"][0]["reasons"])
-        self.assertIn("instagram:zero2sudo | new_grad | 2 | 2 | 2 | 1", report["funnel"])
+        self.assertIn("instagram:zero2sudo | new_grad | 3 | 3 | 3 | 2", report["funnel"])
         self.assertFalse((self.tmp / "state" / "seen.json").exists())  # dry run never writes seen state
 
     def test_role_gate_drops_every_level_and_is_counted(self):
@@ -702,10 +736,63 @@ class DigestRunTest(unittest.TestCase):
                          [("non_engineering", "Ramp"), ("non_engineering", "Wells Fargo"),
                           ("pm", "Rubrik"), ("silicon", "Amazon")])
         posted = {s["company"] for level in report["levels"].values() for s in level["scored"]}
-        self.assertEqual(posted, {"Stripe", "Notion", "Some Seed Startup"})
+        self.assertEqual(posted, {"Stripe", "Notion", "Some Seed Startup", "Unlisted Labs"})
         text = "\n".join(m for level in report["levels"].values() for m in level["messages"])
         self.assertIn("🧑‍🎓 Intern", text)
         self.assertNotIn("no company signals found", text)
+
+    def test_listing_without_locations_posts_with_the_source_label(self):
+        no_key = {k: v for k, v in self.feed[-1].items() if k != "locations"}
+        self.feed.append({**no_key, "company_name": "Keyless Co", "url": "https://jobs.example.com/keyless/6"})
+        self.feed.append({**self.feed[-1], "company_name": "Keyless Co Copy"})  # same URL: dedup drops it
+        ok, _ = self.run_digest(file_exists=True)
+        self.assertTrue(ok)
+        report = json.loads(self.report.read_text())
+        new_grad = {s["company"]: s for s in report["levels"]["new_grad"]["scored"]}
+        self.assertEqual(sorted(new_grad), ["Keyless Co", "Stripe", "Unlisted Labs"])
+        self.assertEqual(new_grad["Unlisted Labs"]["metros"], ["sudo"])
+        self.assertEqual(new_grad["Keyless Co"]["metros"], ["sudo"])
+        self.assertEqual(new_grad["Stripe"]["metros"], ["SF Bay Area"])
+        messages = "\n".join(report["levels"]["new_grad"]["messages"])
+        self.assertRegex(messages, r"Unlisted Labs — <a href=\"https://jobs\.example\.com/unlisted/5555555\">"
+                                   r"Software Engineer, New Grad</a> · sudo")
+        self.assertIn("· SF Bay Area", messages)
+        self.assertIn("location:elsewhere | 1 | 0 | 0", report["drops"])  # Seattle still drops
+        self.assertIn("location:unknown | 0 | 0 | 0", report["drops"])
+        self.assertIn("dedup:url | 1 | 0 | 0", report["drops"])
+
+    def test_other_sources_without_locations_still_drop(self):
+        other = {"name": "other/board", "type": "listings_json", "repo": "o/board", "path": "listings.json",
+                 "level": "new_grad"}
+        config_path = digest.CONFIG_DIR / "config.json"
+        config = json.loads(config_path.read_text())
+        config["sources"].append(other)
+        config_path.write_text(json.dumps(config))
+        unlisted = next(e for e in self.feed if e["company_name"] == "Unlisted Labs")
+        board = [{**unlisted, "url": "https://jobs.example.com/board/7"}]
+        fake = FakeGitHub({("Supra16/JobTracker", "feed/listings.json"): self.feed, ("o/board", "listings.json"): board})
+        with mock.patch("builtins.print"):
+            for p in fake.patches():
+                p.start()
+                self.addCleanup(p.stop)
+            self.assertTrue(digest.main())
+        report = json.loads(self.report.read_text())
+        self.assertIn("location:unknown | 1 | 0 | 0", report["drops"])
+        self.assertIn("other/board | new_grad | 1 | 1 | 1 | 0", report["funnel"])
+        posted = [(s["source"], s["company"]) for s in report["levels"]["new_grad"]["scored"]]
+        self.assertIn(("instagram:zero2sudo", "Unlisted Labs"), posted)
+        self.assertNotIn(("other/board", "Unlisted Labs"), posted)
+
+    def test_labelled_listing_is_suppressed_by_its_sent_url_within_ttl(self):
+        state = self.tmp / "state"
+        state.mkdir()
+        url_key = digest.normalize_url("https://jobs.example.com/unlisted/5555555")
+        (state / "seen.json").write_text(json.dumps({url_key: int(time.time()) - 3600}))
+        ok, _ = self.run_digest(file_exists=True)
+        self.assertTrue(ok)
+        report = json.loads(self.report.read_text())
+        self.assertEqual([s["company"] for s in report["levels"]["new_grad"]["scored"]], ["Stripe"])
+        self.assertIn("ttl:already_sent | 1 | 0 | 0", report["drops"])
 
     def test_missing_feed_is_skipped_quietly(self):
         ok, fake = self.run_digest(file_exists=False)
