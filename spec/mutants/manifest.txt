@@ -13,3 +13,4 @@ active  M8_dedup_keeps_trailing_slash.patch  dedup key keeps a trailing slash (D
 active  M9_dedup_case_sensitive.patch        dedup key keeps host letter case (DEDUP-1)
 active  M10_drop_new_york_label.patch        DM never says New York (LOC-1)
 active  M11_drop_new_jersey_label.patch      DM never says New Jersey (LOC-1)
+active  M12_dedup_keeps_doubled_slash.patch  dedup key keeps a doubled slash in the path (DEDUP-1)

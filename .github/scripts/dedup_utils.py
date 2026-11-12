@@ -3,6 +3,7 @@
 Deduplication utilities for the job tracker.
 Handles URL normalization, dedup key generation, and data processing.
 """
+import re
 from urllib.parse import parse_qsl, urlencode, urlsplit
 from datetime import datetime
 
@@ -19,9 +20,9 @@ _TRACKING_PARAMS = {
 def normalize_url(url):
     """
     The one URL key for dedup and the seen memory (see SPEC.md, DEDUP-1 to DEDUP-3):
-    lowercase scheme and host, path without a trailing slash, and the query minus
-    tracking parameters (utm_* and _TRACKING_PARAMS), sorted. The fragment is
-    dropped. Returns None for a blank or unparseable URL, or one with no scheme,
+    lowercase scheme and host, path with each run of slashes cut to one and no
+    trailing slash, and the query minus tracking parameters (utm_* and
+    _TRACKING_PARAMS), sorted. The fragment is dropped. Returns None for a blank or unparseable URL, or one with no scheme,
     host or path.
     """
     url = (url or "").strip()
@@ -33,7 +34,7 @@ def normalize_url(url):
                        if not (k.lower().startswith("utm_") or k.lower() in _TRACKING_PARAMS))
     except ValueError:
         return None
-    path = parts.path.rstrip("/")
+    path = re.sub(r"/{2,}", "/", parts.path).rstrip("/")
     if not parts.netloc and not path:
         return None
     key = f"{parts.scheme.lower()}://{parts.netloc.lower()}{path}"

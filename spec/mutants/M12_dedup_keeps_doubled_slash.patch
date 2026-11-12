@@ -1,0 +1,13 @@
+diff --git a/.github/scripts/dedup_utils.py b/.github/scripts/dedup_utils.py
+index c8561bb..27aa358 100644
+--- a/.github/scripts/dedup_utils.py
++++ b/.github/scripts/dedup_utils.py
+@@ -34,7 +34,7 @@ def normalize_url(url):
+                        if not (k.lower().startswith("utm_") or k.lower() in _TRACKING_PARAMS))
+     except ValueError:
+         return None
+-    path = re.sub(r"/{2,}", "/", parts.path).rstrip("/")
++    path = parts.path.rstrip("/")
+     if not parts.netloc and not path:
+         return None
+     key = f"{parts.scheme.lower()}://{parts.netloc.lower()}{path}"
