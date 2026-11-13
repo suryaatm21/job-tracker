@@ -6,7 +6,8 @@ The hard gates (location, pay floor, role) run earlier, in
 send_private_digest.py; everything here only raises or lowers a listing's
 score and explains why. Signals:
 
-- Company tier lists (company_tiers.json): a fixed boost and label.
+- Company tier lists (company_tiers.json): a fixed boost, and a label unless
+  the tier sets "show_label": false.
 - Simplify company profile (https://simplify.jobs/c/<slug>): funding rounds
   with dates, amounts and investors. This is the "earn its way in" signal: a
   startup that raises a round shows up on its Simplify page within days, so
