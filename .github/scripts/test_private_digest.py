@@ -767,6 +767,155 @@ class DedupTest(unittest.TestCase):
         self.assertEqual(self.run_dedup([dict(item)], {k: NOW - self.TTL + 60 for k in keys})[0], [])
         self.assertEqual(len(self.run_dedup([dict(item)], {k: NOW - self.TTL - 60 for k in keys})[0]), 1)
 
+    # Copies of one posting from the 2026-11-13 run: different boards, links, names and titles
+    MUON = [("Muon Space", "Software Engineering Intern-Information Systems (Summer 2027)",
+             "https://zapply.jobs/l/d/greenhouse-muonspace-5293973007?s=gh-new-grad-jobs-2027"),
+            ("Muon Space", "Software Engineer Intern - Information Systems",
+             "https://job-boards.greenhouse.io/muonspace/jobs/5293973007")]
+    VITAL_LYFE = [("Vital Lyfe", "Software Engineer, New Grad",
+                   "https://zapply.jobs/l/d/ashby-vital-lyfe-5b5e7e6d-d59e-410b-9a7f-619717c3c942"
+                   "?s=gh-new-grad-jobs-2027"),
+                  ("Vital Lyfe", "Software Engineer I", "https://jobs.ashbyhq.com/vital-lyfe/"
+                   "5b5e7e6d-d59e-410b-9a7f-619717c3c942/application?embed=true")]
+    HPE = [("HPE (University)", "Systems Software Engineer I",
+            "https://zapply.jobs/l/d/workday-hpe-jobsathpe-1215821?s=gh-new-grad-jobs-2027"),
+           ("HPE", "Systems Software Engineer I",
+            "https://zapply.jobs/l/d/workday-hpe-acjobsite-1215821?s=gh-new-grad-jobs-2027"),
+           ("Hewlett Packard Enterprise", "Systems Software Engineer I",
+            "https://hpe.wd5.myworkdayjobs.com/jobsathpe/job/Sunnyvale-California-United-States-of-America/"
+            "Systems-Software-Engineer-I_1215821-2")]
+
+    def test_cross_board_copies_of_one_posting_post_once(self):
+        for copies in (self.MUON, self.VITAL_LYFE, self.HPE):
+            with self.subTest(company=copies[0][0]):
+                items = [self.job(c, t, u, ["SF Bay Area"], source) for (c, t, u), source in zip(copies, "sts")]
+                kept, funnel = self.run_dedup(items)
+                self.assertEqual([i["url"] for i in kept], [copies[0][2]])  # first copy's link wins
+                self.assertEqual(funnel.drops["dedup:posting_id"][LEVEL_NEW_GRAD], len(copies) - 1)
+
+    def test_different_postings_at_one_company_with_similar_titles_both_post(self):
+        kept, _ = self.run_dedup([
+            self.job("Muon Space", "Software Engineer Intern - Information Systems",
+                     "https://job-boards.greenhouse.io/muonspace/jobs/5293973007", ["SF Bay Area"]),
+            self.job("Muon Space", "Software Engineer Intern - Information System",
+                     "https://zapply.jobs/l/d/greenhouse-muonspace-5293973123?s=gh-new-grad-jobs-2027", ["SF Bay Area"]),
+            self.job("HPE", "Systems Software Engineer I",
+                     "https://hpe.wd5.myworkdayjobs.com/jobsathpe/job/Sunnyvale/Systems-Software-Engineer-I_1215821-2",
+                     ["SF Bay Area"]),
+            self.job("HPE", "Systems Software Engineer II",
+                     "https://zapply.jobs/l/d/workday-hpe-jobsathpe-1215822", ["SF Bay Area"])])
+        self.assertEqual(len(kept), 4)
+
+    def test_posting_sent_once_stays_quiet_through_another_boards_link(self):
+        sent = self.job(*self.MUON[0], ["SF Bay Area"])
+        self.run_dedup([sent])
+        seen = {key: NOW - 3600 for key in sent["_keys"]}
+        self.assertIn("pid:greenhouse:5293973007|SF Bay Area", seen)
+        other_board = self.job(*self.MUON[1], ["SF Bay Area"])
+        kept, funnel = self.run_dedup([other_board], seen)
+        self.assertEqual(kept, [])
+        self.assertEqual(funnel.drops["ttl:already_sent"][LEVEL_NEW_GRAD], 1)
+        expired = {key: NOW - self.TTL - 60 for key in seen}
+        self.assertEqual(len(self.run_dedup([self.job(*self.MUON[1], ["SF Bay Area"])], expired)[0]), 1)
+
+    def test_posting_id_covers_only_the_metros_it_was_sent_in(self):
+        sent = self.job(*self.HPE[0], ["SF Bay Area"])
+        self.run_dedup([sent])
+        seen = {key: NOW - 3600 for key in sent["_keys"]}
+        kept, _ = self.run_dedup([self.job(*self.HPE[2], ["SF Bay Area", "NYC"])], seen)
+        self.assertEqual(len(kept), 1)  # NYC was never sent
+        kept, _ = self.run_dedup([self.job(*self.HPE[1], ["SF Bay Area"]), self.job(*self.HPE[2], ["NYC"])])
+        self.assertEqual(len(kept), 2)
+
+    def test_link_without_a_job_id_keeps_todays_keys(self):
+        for url in ("https://careers.oracle.com/jobs/302511888",
+                    "https://zapply.jobs/l/d/oracle-oracle-302511888?s=gh-new-grad-jobs-2027",
+                    "https://hpe.wd5.myworkdayjobs.com/jobsathpe/job/Sunnyvale/Engineer_R-2026-1255"):
+            with self.subTest(url=url):
+                item = self.job("Oracle", "Software Engineer", url, ["SF Bay Area"])
+                self.assertEqual(digest.posting_id_keys(item), [])
+                kept, _ = self.run_dedup([item])
+                self.assertEqual(kept[0]["_keys"], sum(digest.listing_keys(item), []))
+        kept, funnel = self.run_dedup([
+            self.job("Oracle", "Software Engineer New Grad", "https://zapply.jobs/l/d/oracle-oracle-1", ["NYC"]),
+            self.job("Oracle", "Software Engineer New Grad II", "https://careers.oracle.com/jobs/1", ["NYC"]),
+            self.job("Oracle", "Software Engineer, New Grad", "https://careers.oracle.com/jobs/2", ["NYC"])])
+        self.assertEqual(len(kept), 2)
+        self.assertEqual(funnel.drops["dedup:company_title_metro"][LEVEL_NEW_GRAD], 1)
+
+
+class PostingIdTest(unittest.TestCase):
+    def test_wrapper_and_direct_links_share_the_id(self):
+        same = {
+            "greenhouse:5293973007": [
+                "https://zapply.jobs/l/d/greenhouse-muonspace-5293973007?s=gh-new-grad-jobs-2027",
+                "https://job-boards.greenhouse.io/muonspace/jobs/5293973007",
+                "https://boards.greenhouse.io/muonspace/jobs/5293973007?gh_src=abc",
+                "https://job-boards.eu.greenhouse.io/muonspace/jobs/5293973007/apply",
+                "https://boards.greenhouse.io/embed/job_app?for=muonspace&token=5293973007",
+                "https://www.muonspace.com/careers?gh_jid=5293973007"],
+            "ashby:5b5e7e6d-d59e-410b-9a7f-619717c3c942": [
+                "https://zapply.jobs/l/d/ashby-vital-lyfe-5b5e7e6d-d59e-410b-9a7f-619717c3c942?s=gh",
+                "https://jobs.ashbyhq.com/vital-lyfe/5b5e7e6d-d59e-410b-9a7f-619717c3c942/application?embed=true",
+                "https://jobs.ashbyhq.com/f7d8749a-72d6-407c-bf98-292ea630c73a/5B5E7E6D-D59E-410B-9A7F-619717C3C942"],
+            "lever:c75277f4-3030-4c48-a155-fc45726a52ee": [
+                "https://zapply.jobs/l/d/lever-pingwind-c75277f4-3030-4c48-a155-fc45726a52ee",
+                "https://jobs.lever.co/pingwind/c75277f4-3030-4c48-a155-fc45726a52ee/apply",
+                "https://jobs.eu.lever.co/pingwind/c75277f4-3030-4c48-a155-fc45726a52ee"],
+            "workday:hpe:1215821": [
+                "https://zapply.jobs/l/d/workday-hpe-jobsathpe-1215821?s=gh-new-grad-jobs-2027",
+                "https://zapply.jobs/l/d/workday-hpe-acjobsite-1215821?s=gh-new-grad-jobs-2027",
+                "https://hpe.wd5.myworkdayjobs.com/jobsathpe/job/Sunnyvale-California-United-States-of-America/"
+                "Systems-Software-Engineer-I_1215821-2",
+                "https://hpe.wd5.myworkdayjobs.com/en-US/acjobsite/job/Sunnyvale/Systems-Software-Engineer-I_1215821/apply"],
+            "workday:cboe:r4659": [
+                "https://zapply.jobs/l/d/workday-cboe-external-career-cboe-R-4659",
+                "https://cboe.wd1.myworkdayjobs.com/External_Career_CBOE/job/Chicago-IL/Software-Engineer_R-4659-1"],
+            "workday:td:r1521441": [
+                "https://zapply.jobs/l/d/workday-td-td-bank-careers-R_1521441",
+                "https://td.wd3.myworkdayjobs.com/TD_Bank_Careers/job/Toronto/Intern---Technology_R_1521441"],
+            "workday:cox:r202682166": [
+                "https://zapply.jobs/l/d/workday-cox-cox-external-career-site-1-R202682166"],
+            "workday:microchiphr:r95326": [
+                "https://wd5.myworkdaysite.com/recruiting/microchiphr/External/job/Beverly/Engineer_R95326-1",
+                "https://wd5.myworkdaysite.com/en-US/recruiting/microchiphr/External/job/Beverly/Engineer_R95326"],
+        }
+        for expected, urls in same.items():
+            for url in urls:
+                with self.subTest(url=url):
+                    self.assertEqual(digest.posting_id(url), expected)
+
+    def test_year_style_workday_requisitions_stay_distinct(self):
+        base = "https://acme.wd5.myworkdayjobs.com/site/job/Austin/"
+        first = digest.posting_id(base + "Software-Engineer_2026-1")
+        second = digest.posting_id(base + "Data-Engineer_2026-2")
+        self.assertNotEqual(first, second)
+        self.assertEqual(digest.posting_id(base + "Engineer_1215821-2"),
+                         digest.posting_id(base + "Engineer_1215821"))
+
+    def test_ambiguous_or_unknown_ids_give_none(self):
+        for url in [
+            None, "", "not a url", "https://careers.oracle.com/jobs/302511888",
+            "https://zapply.jobs/l/d/oracle-oracle-302511888", "https://zapply.jobs/l/d/sr-acme-123456",
+            "https://zapply.jobs/l/d/phenom-acme-123456", "https://zapply.jobs/l/d/a?s=gh",
+            "https://zapply.jobs/l/d/greenhouse-5293973007",          # no board
+            "https://zapply.jobs/l/c/greenhouse-muonspace-5293973007",
+            "https://zapply.jobs/l/d/workday-hpe-1215821",            # no site
+            "https://zapply.jobs/l/d/workday-citi-2-261009900",       # site or id? "2" is numeric
+            "https://zapply.jobs/l/d/workday-hpe-jobsathpe-1215821-2",
+            "https://zapply.jobs/l/d/workday-insulet-insuletcareers-REQ-2026-18007",
+            "https://moog.wd5.myworkdayjobs.com/MoogCareers/job/Blacksburg/Technician_R-26-16787",
+            "https://selinc.wd1.myworkdayjobs.com/SEL/job/Pullman/Intern_2025-18137",
+            "https://hpe.wd5.myworkdayjobs.com/jobsathpe/job/Sunnyvale/Engineer_123",
+            "https://hpe.wd5.myworkdayjobs.com/jobsathpe/details/Engineer_1215821",
+            "https://hpe.wd5.myworkdayjobs.com/jobsathpe",
+            "https://job-boards.greenhouse.io/muonspace",
+            "https://jobs.ashbyhq.com/vital-lyfe",
+            "https://jobs.lever.co/pingwind/not-a-uuid",
+        ]:
+            with self.subTest(url=url):
+                self.assertIsNone(digest.posting_id(url))
+
 
 class FakeGitHub:
     """Stands in for the GitHub API: default branch "main" and a fixed set of existing files."""
@@ -984,6 +1133,40 @@ class DigestRunTest(unittest.TestCase):
         posted = [(s["source"], s["company"]) for s in report["levels"]["new_grad"]["scored"]]
         self.assertIn(("instagram:zero2sudo", "Unlisted Labs"), posted)
         self.assertNotIn(("other/board", "Unlisted Labs"), posted)
+
+    def test_cross_board_copies_from_fixtures_post_once(self):
+        config_path = digest.CONFIG_DIR / "config.json"
+        config = json.loads(config_path.read_text())
+        listings = json.loads((HERE / "fixtures" / "cross_board_listings.json").read_text())  # {repo: listings}
+        config["sources"] = [s for s in CONFIG["sources"]
+                             if s["name"] in listings or s["name"] == "zapplyjobs/New-Grad-Jobs-2027"]
+        self.assertEqual(len(config["sources"]), 3)
+        config_path.write_text(json.dumps(config))
+        for entry in sum(listings.values(), []):
+            entry["date_posted"] = int(time.time()) - 3600
+        readme = (HERE / "fixtures" / "cross_board_zapply.md").read_text()
+        fake = FakeGitHub({(repo, digest.DEFAULT_LISTINGS_PATH): rows for repo, rows in listings.items()})
+        with mock.patch("builtins.print"), \
+                mock.patch.object(digest, "fetch_file_content", side_effect=lambda repo, path: readme):
+            for p in fake.patches():
+                p.start()
+                self.addCleanup(p.stop)
+            self.assertTrue(digest.main())
+        report = json.loads(self.report.read_text())
+        posted = sorted((level, s["company"], s["url"]) for level, v in report["levels"].items() for s in v["scored"])
+        # Simplify comes before zapply in config.json, so its direct links are the first copies
+        self.assertEqual(posted, [
+            ("intern", "Muon Space", "https://job-boards.greenhouse.io/muonspace/jobs/5293973007"),
+            ("intern", "Muon Space",
+             "https://zapply.jobs/l/d/greenhouse-muonspace-5293973123?s=gh-new-grad-jobs-2027"),
+            ("new_grad", "Hewlett Packard Enterprise", "https://hpe.wd5.myworkdayjobs.com/jobsathpe/job/"
+             "Sunnyvale-California-United-States-of-America/Systems-Software-Engineer-I_1215821-2"),
+            ("new_grad", "Oracle", "https://careers.oracle.com/jobs/302511888"),
+            ("new_grad", "Vital Lyfe",
+             "https://jobs.ashbyhq.com/vital-lyfe/5b5e7e6d-d59e-410b-9a7f-619717c3c942/application?embed=true")])
+        drops = {line.split(" | ")[0]: line for line in report["drops"].splitlines()}
+        self.assertIn("dedup:posting_id", drops)
+        self.assertIn("dedup:company_title_metro", drops)  # the Oracle copy, keyed as before
 
     def test_labelled_listing_is_suppressed_by_its_sent_url_within_ttl(self):
         state = self.tmp / "state"

@@ -1,0 +1,10 @@
+{
+ "SimplifyJobs/New-Grad-Positions": [
+  {"company_name": "Vital Lyfe", "title": "Software Engineer I", "url": "https://jobs.ashbyhq.com/vital-lyfe/5b5e7e6d-d59e-410b-9a7f-619717c3c942/application?embed=true", "locations": ["Los Angeles, CA"], "active": true, "is_visible": true},
+  {"company_name": "Hewlett Packard Enterprise", "title": "Systems Software Engineer I", "url": "https://hpe.wd5.myworkdayjobs.com/jobsathpe/job/Sunnyvale-California-United-States-of-America/Systems-Software-Engineer-I_1215821-2", "locations": ["Sunnyvale, CA"], "active": true, "is_visible": true},
+  {"company_name": "Oracle", "title": "Software Engineer, New Grad", "url": "https://careers.oracle.com/jobs/302511888", "locations": ["Redwood City, CA"], "active": true, "is_visible": true}
+ ],
+ "SimplifyJobs/Summer2027-Internships": [
+  {"company_name": "Muon Space", "title": "Software Engineer Intern - Information Systems", "url": "https://job-boards.greenhouse.io/muonspace/jobs/5293973007", "locations": ["Mountain View, CA"], "active": true, "is_visible": true}
+ ]
+}
