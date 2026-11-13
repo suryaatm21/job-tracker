@@ -355,7 +355,7 @@ def _shared(lists):
     return [x for x in first if all(x in other for other in rest)]
 
 
-def render_company_group(group, strong, max_chars=MAX_TELEGRAM_MESSAGE_CHARS):
+def render_company_group(group, strong, max_chars=MAX_TELEGRAM_MESSAGE_CHARS, show_company=True):
     """
     Splitter entries for one company's listings: [(score, company_reasons,
     listing_reasons, metros, item)]. A single listing keeps the one-bullet form.
@@ -367,8 +367,12 @@ def render_company_group(group, strong, max_chars=MAX_TELEGRAM_MESSAGE_CHARS):
     The group is one entry, so the splitter never separates it. A group too long
     for one message is cut between listings, and every part repeats the company
     line, so each part fits a continuation message within max_chars.
+    show_company=False drops the company-level details (the company already
+    appeared earlier in the same message), leaving listings and listing notes.
     """
     name = group[0][4]["company_name"]
+    if not show_company:
+        group = [(sc, [], lr, m, it) for sc, _, lr, m, it in group]
     if len(group) == 1:
         _, company_reasons, listing_reasons, metros, item = group[0]
         reasons = company_reasons + listing_reasons
@@ -428,16 +432,22 @@ def render_level(level, scored, window_hours, strong_threshold, max_strong, max_
     window = f"last {int(window_hours)}h" if window_hours < 72 else f"last {int(window_hours // 24)}d"
     header = f"<b>{LEVEL_TITLES[level]}</b> — {len(strong) + len(maybe)} new ({window})"
     lines = []
+    shown = set()
+
+    def add_groups(groups, is_strong):
+        for group in groups:
+            key = normalize_company(group[0][4]["company_name"]) or str(group[0][4]["company_name"]).strip().casefold()
+            lines.extend(render_company_group(group, is_strong, max_chars, key not in shown))
+            shown.add(key)
+
     if strong:
         lines.append(f"⭐ <b>Strong signal ({len(strong)})</b>")
-        for group in group_by_company(strong):
-            lines.extend(render_company_group(group, True, max_chars))
+        add_groups(group_by_company(strong), True)
     if maybe:
         if strong:
             lines.append("")
         lines.append(f"🤔 <b>Maybe ({len(maybe)})</b>")
-        for group in group_by_company(maybe):
-            lines.extend(render_company_group(group, False, max_chars))
+        add_groups(group_by_company(maybe), False)
     if held_back:
         lines.append(f"\n… {held_back} lower-scored listings held for a later run")
     return header, lines, [s[4] for s in strong + maybe]
@@ -523,7 +533,7 @@ def main():
     deferred = 0
     for kept in fresh:
         tier_match = tiers.match(kept["company_name"])
-        kept["_tier"] = tier_match[0].get("key") if tier_match else None
+        kept["_on_tier_list"] = bool(tier_match)
         # Listed companies already clear the bar; fetch profiles only for the rest
         profile = None
         if not tier_match or int(tier_match[0].get("points", 0)) < strong_threshold:
@@ -610,7 +620,7 @@ def report_dry_run(rendered, funnel, strong_threshold):
             "messages": batches,
             "scored": [{"score": s, "reasons": cr + lr, "metros": m, "company": i["company_name"],
                         "title": i["title"], "source": i["_source"], "url": get_primary_url(i),
-                        "tier": i.get("_tier"), "on_a_tier_list": bool(i.get("_tier"))}
+                        "on_a_tier_list": i["_on_tier_list"]}
                        for s, cr, lr, m, i in scored],
         }
     if DRY_RUN_REPORT:

@@ -621,6 +621,17 @@ class GroupedRenderTest(unittest.TestCase):
         self.assertIn("backed by Y Combinator", first)
         self.assertNotIn("backed by", second)
 
+    def test_company_details_appear_once_across_strong_and_maybe(self):
+        scored = [entry(5, "Acme", "SWE Intern", ["raised Series C $250M"]),
+                  entry(4, "Acme", "ML Intern", ["raised Series C $250M"]),
+                  entry(2, "Acme", "Data Intern", ["raised Series C $250M"], ["PhD/MS only"])]
+        _, lines, _ = self.render(scored)
+        text = "\n".join(lines)
+        self.assertEqual(text.count("raised Series C $250M"), 1)
+        maybe = lines[-1]
+        self.assertTrue(maybe.startswith("• Acme — <a href="), maybe)
+        self.assertTrue(maybe.endswith("<i>PhD/MS only</i>"), maybe)
+
     def test_caps_count_listings_not_companies(self):
         header, lines, shown = self.render(self.interleaved(), max_strong=2)
         self.assertIn("2 new", header)
@@ -924,7 +935,7 @@ class DigestRunTest(unittest.TestCase):
         report = json.loads(self.report.read_text())
         google = next(s for s in report["levels"]["intern"]["scored"] if s["company"] == "Google")
         self.assertGreaterEqual(google["score"], report["strong_threshold"])
-        self.assertEqual((google["tier"], google["on_a_tier_list"]), ("big_tech", True))
+        self.assertTrue(google["on_a_tier_list"])
         intern_text = "\n".join(report["levels"]["intern"]["messages"])
         strong = intern_text.split("⭐", 1)[1].split("🤔", 1)[0]
         self.assertIn("Google", strong)
