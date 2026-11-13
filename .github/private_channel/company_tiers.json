@@ -1,6 +1,6 @@
 {
   "_about": [
-    "Soft signal for the private digest: a listed company gets the tier's points and label. A company on no list is never dropped for that reason.",
+    "Soft signal for the private digest: a listed company gets the tier's points and label. A tier with \"show_label\": false scores the same but never prints its label in the digest. A company on no list is never dropped for that reason.",
     "Matching is exact on the normalized name or an alias (case, punctuation and Inc/LLC/Corp suffixes ignored), never a substring, so add every spelling the boards use to 'aliases'.",
     "The bar is Microsoft/NVIDIA new-grad compensation. Comp figures come from speedyapply's Salary column (https://github.com/speedyapply/2027-SWE-College-Jobs, NEW_GRAD_USA.md and README.md, read 2026-11-08), which lists one figure per company: NVIDIA new grad $172k/yr, Microsoft intern $52/hr, NVIDIA intern $62/hr.",
     "levels.fyi figures marked 'verified' were read on 2026-11-08; levels.fyi blocked further requests that day, so other levels.fyi links are unverified pointers."
@@ -9,6 +9,7 @@
     {
       "key": "big_tech",
       "label": "big tech",
+      "show_label": false,
       "points": 4,
       "description": "Big tech at or above the Microsoft/NVIDIA new-grad bar.",
       "companies": [

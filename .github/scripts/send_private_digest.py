@@ -7,9 +7,11 @@ posted to one private Telegram chat.
 Pipeline (counts are reported per source and level after every stage):
     fetch -> quality -> window -> location (hard gate; see location_outcome)
           -> pay (hard gate, only when the listing states pay)
-          -> role (hard gate: PM, silicon and non-engineering roles drop; see RoleGate)
+          -> role (hard gate: PM, silicon, firmware, electrical and non-engineering
+             roles drop; see RoleGate)
           -> dedup + TTL state, per listing (see drop_seen_and_duplicates)
-          -> score (tiers, Simplify funding profile, posted pay) -> render
+          -> score (tiers, Simplify funding profile, posted pay)
+          -> render (grouped by company; see render_company_group)
 
 The role gate runs before dedup so a dropped copy of a posting never claims the
 dedup keys of a kept copy from another board. Scoring never drops a listing:
@@ -45,7 +47,8 @@ from repo_utils import get_default_branch, fetch_listings, DEFAULT_LISTINGS_PATH
 from dedup_utils import get_primary_url, normalize_url
 from state_utils import (load_seen, save_seen, get_cache_key,
                          should_include_item, parse_epoch)
-from telegram_utils import batch_send_message, is_dry_run, safe_join_lines, send_message
+from telegram_utils import (batch_send_message, is_dry_run, safe_join_lines, send_message,
+                            tg_len, CONT_PREFIX)
 from markdown_listings import parse_markdown_tables
 from opportunity_filters import (tag_level, LocationMatcher, CompanyTiers, normalize_company,
                                  parse_pay, listing_pay_text, passes_pay_gate, RoleGate,
@@ -322,11 +325,98 @@ def location_outcome(item, locator, missing_location_labels):
     return outcome, metros, metros
 
 
-def render_level(level, scored, window_hours, strong_threshold, max_strong, max_maybe):
+def _esc(text):
+    return html.escape(str(text or ""), quote=False)
+
+
+def _title_link(item):
+    url = html.escape(get_primary_url(item), quote=True)
+    return f"<a href=\"{url}\">{_esc(item['title'])}</a>"
+
+
+def group_by_company(entries):
     """
-    Header and lines for one level. scored: [(score, reasons, metros, item)]
-    sorted best first. Listings past a section's cap are counted in a closing
-    line and are not marked sent, so they get another chance next run.
+    Split scored entries into one list per company, compared as company_tiers
+    matching normalizes names ("Vital Lyfe" and "VITAL LYFE" are one company).
+    Groups come in the order of their first, best-ranked listing, and keep the
+    input order inside each group.
+    """
+    groups = {}
+    for entry in entries:
+        name = entry[4]["company_name"]
+        key = normalize_company(name) or str(name).strip().casefold()
+        groups.setdefault(key, []).append(entry)
+    return list(groups.values())
+
+
+def _shared(lists):
+    """Items of the first list that every list holds, in the first list's order."""
+    first, *rest = lists
+    return [x for x in first if all(x in other for other in rest)]
+
+
+def render_company_group(group, strong, max_chars=MAX_TELEGRAM_MESSAGE_CHARS):
+    """
+    Splitter entries for one company's listings: [(score, company_reasons,
+    listing_reasons, metros, item)]. A single listing keeps the one-bullet form.
+    Several listings get one company line holding the company name and every
+    detail all of them share (tier, funding, investors, one common metro), then
+    one line per listing with its title link, its own metro and its own notes
+    (posted pay, PhD/MS only, pay unparsed). Scores order the listings but are
+    not printed.
+    The group is one entry, so the splitter never separates it. A group too long
+    for one message is cut between listings, and every part repeats the company
+    line, so each part fits a continuation message within max_chars.
+    """
+    name = group[0][4]["company_name"]
+    if len(group) == 1:
+        _, company_reasons, listing_reasons, metros, item = group[0]
+        reasons = company_reasons + listing_reasons
+        if strong:
+            why = f"\n    ↳ {_esc(' · '.join(reasons))}" if reasons else ""
+            return [f"• <b>{_esc(name)}</b> — {_title_link(item)} · {_esc(' / '.join(metros))}{why}"]
+        why = f" · <i>{_esc(' · '.join(reasons))}</i>" if reasons else ""
+        return [f"• {_esc(name)} — {_title_link(item)} · {_esc(' / '.join(metros))}{why}"]
+
+    metro_texts = [" / ".join(entry[3]) for entry in group]
+    shared_metro = metro_texts[0] if len(set(metro_texts)) == 1 else None
+    shared_reasons = _shared([entry[1] for entry in group])
+    company_line = f"• <b>{_esc(name)}</b>" if strong else f"• {_esc(name)}"
+    if shared_metro:
+        company_line += f" · {_esc(shared_metro)}"
+    if shared_reasons:
+        company_line += f" · <i>{_esc(' · '.join(shared_reasons))}</i>"
+
+    listing_lines = []
+    for (_, company_reasons, listing_reasons, _, item), metro_text in zip(group, metro_texts):
+        line = f"    ◦ {_title_link(item)}"
+        if not shared_metro:
+            line += f" · {_esc(metro_text)}"
+        notes = [r for r in company_reasons if r not in shared_reasons] + listing_reasons
+        if notes:
+            line += f" · <i>{_esc(' · '.join(notes))}</i>"
+        listing_lines.append(line)
+
+    limit = max_chars - tg_len(CONT_PREFIX)
+    entries, part = [], [company_line]
+    for line in listing_lines:
+        if len(part) > 1 and tg_len("\n".join(part + [line])) > limit:
+            entries.append("\n".join(part))
+            part = [company_line]
+        part.append(line)
+    entries.append("\n".join(part))
+    return entries
+
+
+def render_level(level, scored, window_hours, strong_threshold, max_strong, max_maybe,
+                 max_chars=MAX_TELEGRAM_MESSAGE_CHARS):
+    """
+    Header and splitter entries for one level. scored: [(score, company_reasons,
+    listing_reasons, metros, item)] sorted best first. Each section takes its
+    best listings up to its cap, then groups them by company (render_company_group).
+    Section counts and caps count listings. Listings past a section's cap are
+    counted in a closing line and are not marked sent, so they get another
+    chance next run.
     """
     all_strong = [s for s in scored if s[0] >= strong_threshold]
     all_maybe = [s for s in scored if s[0] < strong_threshold]
@@ -335,28 +425,22 @@ def render_level(level, scored, window_hours, strong_threshold, max_strong, max_
     if not strong and not maybe:
         return None, [], []
 
-    esc = lambda s: html.escape(str(s or ""), quote=False)
     window = f"last {int(window_hours)}h" if window_hours < 72 else f"last {int(window_hours // 24)}d"
     header = f"<b>{LEVEL_TITLES[level]}</b> — {len(strong) + len(maybe)} new ({window})"
     lines = []
     if strong:
         lines.append(f"⭐ <b>Strong signal ({len(strong)})</b>")
-        for score, reasons, metros, item in strong:
-            url = html.escape(get_primary_url(item), quote=True)
-            lines.append(f"• <b>{esc(item['company_name'])}</b> — <a href=\"{url}\">{esc(item['title'])}</a>"
-                         f" · {esc(' / '.join(metros))}\n    ↳ {esc(' · '.join(reasons))} ({score})")
+        for group in group_by_company(strong):
+            lines.extend(render_company_group(group, True, max_chars))
     if maybe:
         if strong:
             lines.append("")
         lines.append(f"🤔 <b>Maybe ({len(maybe)})</b>")
-        for score, reasons, metros, item in maybe:
-            url = html.escape(get_primary_url(item), quote=True)
-            why = f" · <i>{esc(' · '.join(reasons))}</i>" if reasons else ""
-            lines.append(f"• {esc(item['company_name'])} — <a href=\"{url}\">{esc(item['title'])}</a>"
-                         f" · {esc(' / '.join(metros))}{why}")
+        for group in group_by_company(maybe):
+            lines.extend(render_company_group(group, False, max_chars))
     if held_back:
         lines.append(f"\n… {held_back} lower-scored listings held for a later run")
-    return header, lines, [s[3] for s in strong + maybe]
+    return header, lines, [s[4] for s in strong + maybe]
 
 
 def main():
@@ -439,6 +523,7 @@ def main():
     deferred = 0
     for kept in fresh:
         tier_match = tiers.match(kept["company_name"])
+        kept["_tier"] = tier_match[0].get("key") if tier_match else None
         # Listed companies already clear the bar; fetch profiles only for the rest
         profile = None
         if not tier_match or int(tier_match[0].get("points", 0)) < strong_threshold:
@@ -448,18 +533,20 @@ def main():
                 deferred += 1
                 funnel.note("deferred:profile_lookup_budget", kept)
                 continue
-        score, reasons = score_listing(kept, kept["_level"], tier_match, profile, scoring, now_epoch)
-        by_level[kept["_level"]].append((score, reasons, kept["_location_display"], kept))
+        score, company_reasons, listing_reasons = score_listing(
+            kept, kept["_level"], tier_match, profile, scoring, now_epoch)
+        by_level[kept["_level"]].append(
+            (score, company_reasons, listing_reasons, kept["_location_display"], kept))
 
     rendered = []
     for level in LEVELS:
-        scored = sorted(by_level.get(level, []), key=lambda s: (s[0], s[3]["_timestamp"]), reverse=True)
+        scored = sorted(by_level.get(level, []), key=lambda s: (s[0], s[4]["_timestamp"]), reverse=True)
         header, lines, shown = render_level(
-            level, [s[:4] for s in scored], WINDOW_HOURS, strong_threshold,
+            level, scored, WINDOW_HOURS, strong_threshold,
             digest_cfg.get("max_strong_per_level", 40), digest_cfg.get("max_maybe_per_level", 25))
         if header:
             shown_ids = {id(i) for i in shown}
-            posted = [s[3] for s in scored if id(s[3]) in shown_ids]
+            posted = [s[4] for s in scored if id(s[4]) in shown_ids]
             rendered.append((level, header, lines, posted, scored))
 
     debug_log("[SUMMARY] Funnel (survivors after each stage)\n" + funnel.table())
@@ -521,10 +608,10 @@ def report_dry_run(rendered, funnel, strong_threshold):
             send_message(None, None, b, "HTML")  # DRY_RUN: logs a [DRY-SENT] record, sends nothing
         report["levels"][level] = {
             "messages": batches,
-            "scored": [{"score": s, "reasons": r, "metros": m, "company": i["company_name"],
+            "scored": [{"score": s, "reasons": cr + lr, "metros": m, "company": i["company_name"],
                         "title": i["title"], "source": i["_source"], "url": get_primary_url(i),
-                        "on_a_tier_list": any(x.startswith("tier:") for x in r)}
-                       for s, r, m, i in scored],
+                        "tier": i.get("_tier"), "on_a_tier_list": bool(i.get("_tier"))}
+                       for s, cr, lr, m, i in scored],
         }
     if DRY_RUN_REPORT:
         pathlib.Path(DRY_RUN_REPORT).write_text(json.dumps(report, indent=1), encoding="utf-8")

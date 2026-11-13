@@ -236,16 +236,20 @@ def is_equity_round(round_type, prefixes):
 
 def score_listing(item, level, tier_match, profile, scoring, now_epoch):
     """
-    Score one listing. Returns (score, reasons) where reasons are short strings
-    such as "tier: big tech" or "raised Series B $45M, Oct 2026".
+    Score one listing. Returns (score, company_reasons, listing_reasons): short
+    strings such as "tier: promising startup" or "raised Series B $45M, Oct 2026"
+    describe the company (tier, unless the tier sets "show_label": false, and
+    Simplify funding profile; the same for every listing of that company), and "posted pay $55/hr", "pay unparsed: ..." or
+    "PhD/MS only" describe this listing alone.
     """
     score = 0
-    reasons = []
+    company_reasons = []
 
     if tier_match:
         tier, _company = tier_match
         score += int(tier.get("points", 0))
-        reasons.append(f"tier: {tier.get('label', tier.get('key', 'listed'))}")
+        if tier.get("show_label", True):
+            company_reasons.append(f"tier: {tier.get('label', tier.get('key', 'listed'))}")
 
     funding = scoring.get("funding", {})
     if profile and not profile.get("stock_symbol"):
@@ -260,7 +264,7 @@ def score_listing(item, level, tier_match, profile, scoring, now_epoch):
             score += int(funding.get("recent_round_points", 2))
             when = datetime.fromtimestamp(latest["date_epoch"], tz=timezone.utc).strftime("%b %Y")
             amount = f" {_money(latest['amount'])}" if latest.get("amount") else ""
-            reasons.append(f"raised {_round_label(latest['round'])}{amount}, {when}")
+            company_reasons.append(f"raised {_round_label(latest['round'])}{amount}, {when}")
             if (latest.get("amount") or 0) >= funding.get("large_round_usd", 50_000_000):
                 score += int(funding.get("large_round_points", 1))
 
@@ -271,13 +275,14 @@ def score_listing(item, level, tier_match, profile, scoring, now_epoch):
         if investors:
             score += int(funding.get("top_investor_points", 1))
             shown = ", ".join(investors[:2]) + (f" +{len(investors) - 2}" if len(investors) > 2 else "")
-            reasons.append(f"backed by {shown}")
+            company_reasons.append(f"backed by {shown}")
 
         total = profile.get("funding_total") or 0
         if total >= funding.get("large_total_usd", 500_000_000):
             score += int(funding.get("large_total_points", 1))
-            reasons.append(f"{_money(total)} raised total")
+            company_reasons.append(f"{_money(total)} raised total")
 
+    listing_reasons = []
     pay_cfg = scoring.get("posted_pay", {})
     pay = item.get("_pay") or parse_pay(listing_pay_text(item))
     if pay.get("status") == PAY_OK:
@@ -291,12 +296,12 @@ def score_listing(item, level, tier_match, profile, scoring, now_epoch):
             meets = intern_bar if pay["unit"] == "hr" else new_grad_bar
         if meets:
             score += int(pay_cfg.get("points", 3))
-            reasons.append(f"posted pay {pay['text']}")
+            listing_reasons.append(f"posted pay {pay['text']}")
     elif pay.get("status") == PAY_UNPARSED:
-        reasons.append(f"pay unparsed: {pay.get('text', '')[:40]}")
+        listing_reasons.append(f"pay unparsed: {pay.get('text', '')[:40]}")
 
     if is_graduate_only(item):
         score += int(scoring.get("graduate_only_points", -4))
-        reasons.append("PhD/MS only")
+        listing_reasons.append("PhD/MS only")
 
-    return score, reasons
+    return score, company_reasons, listing_reasons

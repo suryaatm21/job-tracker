@@ -22,7 +22,7 @@ from company_signals import CompanyProfiles, parse_simplify_company_page, score_
 from markdown_listings import parse_markdown_tables, approximate_posted_epoch
 from opportunity_filters import (LocationMatcher, CompanyTiers, tag_level, normalize_company, parse_pay,
                                  passes_pay_gate, is_graduate_only, RoleGate, ROLE_PM, ROLE_SILICON,
-                                 ROLE_NON_ENGINEERING, LEVEL_INTERN, LEVEL_NEW_GRAD,
+                                 ROLE_FIRMWARE_ELECTRICAL, ROLE_NON_ENGINEERING, LEVEL_INTERN, LEVEL_NEW_GRAD,
                                  LEVEL_UNKNOWN, LOCATION_MATCH, LOCATION_REMOTE, LOCATION_UNKNOWN,
                                  LOCATION_ELSEWHERE, PAY_OK, PAY_NONE, PAY_UNPARSED)
 
@@ -299,7 +299,9 @@ class ScoringTest(unittest.TestCase):
 
     def test_unlisted_startup_earns_points_from_funding(self):
         profile = parse_simplify_company_page(simplify_page(STARTUP))
-        score, reasons = score_listing({"title": "SWE"}, LEVEL_NEW_GRAD, None, profile, self.scoring, NOW)
+        score, reasons, listing_reasons = score_listing({"title": "SWE"}, LEVEL_NEW_GRAD, None, profile,
+                                                        self.scoring, NOW)
+        self.assertEqual(listing_reasons, [])
         # recent round (+2) + round >= $50M (+1) + top investor in 36 months (+1); debt ignored
         self.assertEqual(score, 4)
         self.assertIn("raised Series B $80M, Sep 2026", reasons)
@@ -307,20 +309,27 @@ class ScoringTest(unittest.TestCase):
 
     def test_public_company_gets_no_funding_points(self):
         profile = parse_simplify_company_page(simplify_page(dict(STARTUP, stock_symbol="ACME")))
-        self.assertEqual(score_listing({"title": "SWE"}, LEVEL_NEW_GRAD, None, profile, self.scoring, NOW), (0, []))
+        self.assertEqual(score_listing({"title": "SWE"}, LEVEL_NEW_GRAD, None, profile, self.scoring, NOW),
+                         (0, [], []))
 
     def test_tier_pay_and_penalties(self):
-        tier = self.tiers.match("Google")
-        score, reasons = score_listing({"title": "SWE", "salary": "$196k/yr"}, LEVEL_NEW_GRAD, tier, None, self.scoring, NOW)
-        self.assertEqual((score, reasons), (7, ["tier: big tech", "posted pay $196k/yr"]))
-        score, reasons = score_listing({"title": "Research Intern - PhD"}, LEVEL_INTERN, tier, None, self.scoring, NOW)
+        tier = self.tiers.match("Stripe")
+        self.assertEqual(score_listing({"title": "SWE", "salary": "$196k/yr"}, LEVEL_NEW_GRAD, tier, None,
+                                       self.scoring, NOW),
+                         (6, ["tier: promising startup"], ["posted pay $196k/yr"]))
+        # The big tech tier scores but never prints its label
+        self.assertEqual(score_listing({"title": "SWE", "salary": "$196k/yr"}, LEVEL_NEW_GRAD,
+                                       self.tiers.match("Google"), None, self.scoring, NOW),
+                         (7, [], ["posted pay $196k/yr"]))
+        score, _, listing_reasons = score_listing({"title": "Research Intern - PhD"}, LEVEL_INTERN, tier, None,
+                                                  self.scoring, NOW)
         self.assertLess(score, self.scoring["strong_threshold"])
-        self.assertIn("PhD/MS only", reasons)
+        self.assertEqual(listing_reasons, ["PhD/MS only"])
         # Board category no longer scores: the role gate drops off-target roles before scoring
         self.assertEqual(score_listing({"title": "SWE", "category": "Business & Operations"},
-                                       LEVEL_NEW_GRAD, None, None, self.scoring, NOW), (0, []))
-        _, reasons = score_listing({"title": "SWE", "salary": "competitive"}, LEVEL_NEW_GRAD, None, None, self.scoring, NOW)
-        self.assertEqual(reasons, ["pay unparsed: competitive"])
+                                       LEVEL_NEW_GRAD, None, None, self.scoring, NOW), (0, [], []))
+        self.assertEqual(score_listing({"title": "SWE", "salary": "competitive"}, LEVEL_NEW_GRAD, None, None,
+                                       self.scoring, NOW), (0, [], ["pay unparsed: competitive"]))
 
 
 class CompanyProfilesTest(unittest.TestCase):
@@ -418,6 +427,23 @@ class RoleGateTest(unittest.TestCase):
                 self.assertEqual(self.classify(title, "Hardware")[0], ROLE_SILICON)
         self.assertIsNone(self.classify("Hardware Engineer Intern", "Hardware"))  # other hardware stays
 
+    def test_firmware_and_electrical_drop_whatever_else_the_title_says(self):
+        # Titles from the 2026-11-13 digest, plus a firmware title that also says software
+        cases = [("Electrical Engineer - Schie", "electrical"),
+                 ("Electrical Engineering Internship - Summer 2027", "electrical"),
+                 ("Fellow Firmware Engineering", "firmware"),
+                 ("Firmware Engineer Intern - FW Core System Services", "firmware"),
+                 ("Embedded Firmware Software Engineer", "firmware")]
+        for title, term in cases:
+            for category, engineering_only in ((None, False), ("Hardware", False), ("Software", True)):
+                with self.subTest(title=title, category=category):
+                    self.assertEqual(self.classify(title, category, engineering_only),
+                                     (ROLE_FIRMWARE_ELECTRICAL, term))
+        for title in ["Embedded Software Engineer Intern", "Hardware Engineer Intern", "Software Engineer Intern"]:
+            for category in (None, "Hardware", "Software"):
+                with self.subTest(title=title, category=category):
+                    self.assertIsNone(self.classify(title, category))
+
     def test_categories(self):
         # Simplify's Product bucket drops unless the title names engineering work
         self.assertEqual(self.classify("Recipe Developer", "Product"), (ROLE_PM, "category: Product"))
@@ -494,7 +520,7 @@ class RoleGateTest(unittest.TestCase):
 class RenderTest(unittest.TestCase):
     def test_listing_without_reasons_has_no_placeholder(self):
         item = {"company_name": "Acme", "title": "Software Engineer", "url": "https://x.test/1"}
-        header, lines, _ = digest.render_level(LEVEL_INTERN, [(0, [], ["NYC"], item)], 48, 3, 40, 25)
+        header, lines, _ = digest.render_level(LEVEL_INTERN, [(0, [], [], ["NYC"], item)], 48, 3, 40, 25)
         line = next(l for l in lines if "Acme" in l)
         self.assertTrue(line.endswith("NYC"), line)
         self.assertNotIn("signals", line)
@@ -504,7 +530,8 @@ class RenderTest(unittest.TestCase):
 
     def test_html_is_escaped_and_overflow_counted(self):
         item = {"company_name": "M&T <Bank>", "title": "Data & API <Eng>", "url": "https://x.test/a?b=1&c=2"}
-        scored = [(5, ["tier: big tech"], ["NYC"], item), (0, [], ["NYC"], dict(item)), (0, [], ["NYC"], dict(item))]
+        scored = [(5, ["tier: promising startup"], [], ["NYC"], item), (0, [], [], ["NYC"], dict(item)),
+                  (0, [], [], ["NYC"], dict(item))]
         header, lines, shown = digest.render_level(LEVEL_NEW_GRAD, scored, 48, 3, max_strong=40, max_maybe=1)
         text = header + "\n".join(lines)
         self.assertIn("M&amp;T &lt;Bank&gt;", text)
@@ -513,6 +540,113 @@ class RenderTest(unittest.TestCase):
         self.assertNotIn("<", leftover)  # only Telegram-safe tags remain
         self.assertIn("1 lower-scored listings held", text)
         self.assertEqual(len(shown), 2)  # the held-back listing is not marked as sent
+
+
+MUON = ["raised Series C $250M, Aug 2026"]
+VITAL = ["raised Seed $18M, Dec 2025", "backed by General Catalyst"]
+
+
+def entry(score, company, title, company_reasons=(), listing_reasons=(), metros=("SF Bay Area",), url=None):
+    item = {"company_name": company, "title": title,
+            "url": url or f"https://jobs.example.com/{normalize_company(company)}/{title}".replace(" ", "-")}
+    return (score, list(company_reasons), list(listing_reasons), list(metros), item)
+
+
+class GroupedRenderTest(unittest.TestCase):
+    """Listings sit together under one company line that carries the company-level details once."""
+
+    def render(self, scored, **kw):
+        kw = {"max_strong": 40, "max_maybe": 25, **kw}
+        return digest.render_level(LEVEL_INTERN, scored, 48, 3, **kw)
+
+    def interleaved(self):
+        return [entry(6, "Muon Space", "Flight Software Intern", MUON, ["posted pay $60/hr"]),
+                entry(5, "Muon Space", "Ground Software Intern", MUON),
+                entry(4, "Vital Lyfe", "Software Engineering Intern", VITAL),
+                entry(4, "VITAL LYFE", "Embedded Software Engineer Intern", VITAL),
+                entry(3, "Muon Space", "Mission Software Intern", MUON, metros=["Los Angeles"])]
+
+    def test_company_listings_sit_together_in_best_first_order(self):
+        header, lines, shown = self.render(self.interleaved())
+        self.assertEqual(lines[0], "⭐ <b>Strong signal (5)</b>")
+        self.assertIn("5 new", header)
+        muon, vital = lines[1], lines[2]
+        self.assertEqual(len(lines), 3)  # one splitter entry per company
+        self.assertTrue(muon.startswith("• <b>Muon Space</b>"), muon)
+        self.assertEqual([re.search(r">([^<]+)</a>", l).group(1) for l in muon.split("\n")[1:]],
+                         ["Flight Software Intern", "Ground Software Intern", "Mission Software Intern"])
+        self.assertTrue(vital.startswith("• <b>Vital Lyfe</b>"), vital)  # VITAL LYFE joins Vital Lyfe
+        self.assertEqual(len(vital.split("\n")), 3)
+        self.assertEqual([i["title"] for i in shown], [e[4]["title"] for e in self.interleaved()])
+
+    def test_company_details_appear_once_and_listing_notes_stay_on_their_line(self):
+        _, lines, _ = self.render(self.interleaved())
+        text = "\n".join(lines)
+        self.assertEqual(text.count("raised Series C $250M, Aug 2026"), 1)
+        self.assertEqual(text.count("raised Seed $18M, Dec 2025 · backed by General Catalyst"), 1)
+        muon_company, flight, ground, mission = lines[1].split("\n")
+        self.assertIn("raised Series C $250M, Aug 2026", muon_company)
+        self.assertIn("posted pay $60/hr", flight)
+        self.assertTrue(flight.endswith(" · <i>posted pay $60/hr</i>"), flight)
+        self.assertTrue(ground.endswith("</a> · SF Bay Area"), ground)
+        self.assertIsNone(re.search(r"\(\d+\)", re.sub(r"<b>[^<]*</b>", "", text)), text)  # no scores printed
+        # Muon's metros differ, so each listing names its own
+        self.assertNotIn("SF Bay Area", muon_company)
+        self.assertIn("Los Angeles", mission)
+        # Vital Lyfe's listings share one metro, so it moves to the company line
+        vital_company, *vital_listings = lines[2].split("\n")
+        self.assertEqual(vital_company, "• <b>Vital Lyfe</b> · SF Bay Area · "
+                                        "<i>raised Seed $18M, Dec 2025 · backed by General Catalyst</i>")
+        for line in vital_listings:
+            self.assertNotIn("SF Bay Area", line)
+            self.assertTrue(line.startswith("    ◦ <a href="), line)
+
+    def test_maybe_section_groups_without_scores(self):
+        scored = [entry(1, "Acme", "SWE Intern", ["backed by Y Combinator"], ["PhD/MS only"]),
+                  entry(0, "Other Co", "ML Intern"),
+                  entry(0, "acme", "Data Intern", ["backed by Y Combinator"])]
+        _, lines, _ = self.render(scored)
+        self.assertEqual(lines[0], "🤔 <b>Maybe (3)</b>")
+        acme = lines[1].split("\n")
+        self.assertEqual(acme[0], "• Acme · SF Bay Area · <i>backed by Y Combinator</i>")
+        self.assertTrue(acme[1].endswith("</a> · <i>PhD/MS only</i>"), acme[1])
+        self.assertTrue(acme[2].endswith("</a>"), acme[2])
+        self.assertTrue(lines[2].startswith("• Other Co — <a href="), lines[2])  # one listing: one line
+
+    def test_a_company_detail_not_every_listing_shares_stays_on_its_listing(self):
+        scored = [entry(5, "Acme", "SWE Intern", ["tier: promising startup", "backed by Y Combinator"]),
+                  entry(3, "Acme", "ML Intern", ["tier: promising startup"])]
+        company, first, second = self.render(scored)[1][1].split("\n")
+        self.assertIn("<i>tier: promising startup</i>", company)
+        self.assertIn("backed by Y Combinator", first)
+        self.assertNotIn("backed by", second)
+
+    def test_caps_count_listings_not_companies(self):
+        header, lines, shown = self.render(self.interleaved(), max_strong=2)
+        self.assertIn("2 new", header)
+        self.assertEqual(lines[0], "⭐ <b>Strong signal (2)</b>")
+        self.assertEqual(len(lines[1].split("\n")), 3)  # Muon line + its two best listings
+        self.assertIn("3 lower-scored listings held", lines[-1])
+        self.assertEqual(len(shown), 2)
+
+    def test_oversized_group_splits_between_listings_and_repeats_the_company_line(self):
+        long_url = "https://acme.wd5.myworkdayjobs.com/en-US/External_Careers/job/San-Francisco-CA/" + "x" * 180
+        scored = [entry(5, "Acme", f"Software Engineer Intern, Team {n:02d}", MUON, ["posted pay $60/hr"],
+                        metros=[("SF Bay Area", "NYC")[n % 2]], url=f"{long_url}/{n}") for n in range(40)]
+        header, lines, _ = self.render(scored)
+        self.assertGreater(len(lines), 2)  # the group came back in parts
+        batches = digest.safe_join_lines(header, lines, digest.MAX_TELEGRAM_MESSAGE_CHARS)
+        self.assertGreater(len(batches), 1)
+        titles = []
+        for batch in batches:
+            self.assertLessEqual(digest.tg_len(batch), digest.MAX_TELEGRAM_MESSAGE_CHARS)
+            self.assertNotIn("…", batch)
+            body = batch.split("\n\n", 1)[1]
+            if body.startswith("⭐"):
+                body = body.split("\n", 1)[1]
+            self.assertTrue(body.startswith("• <b>Acme</b> · <i>raised Series C $250M, Aug 2026</i>\n"), body[:80])
+            titles += re.findall(r"Team (\d\d)", batch)
+        self.assertEqual(titles, [f"{n:02d}" for n in range(40)])  # none lost, none reordered
 
 
 class CircuitBreakerTest(unittest.TestCase):
@@ -776,6 +910,27 @@ class DigestRunTest(unittest.TestCase):
         text = "\n".join(m for level in report["levels"].values() for m in level["messages"])
         self.assertIn("🧑‍🎓 Intern", text)
         self.assertNotIn("no company signals found", text)
+
+    def test_big_tech_reaches_strong_signal_without_its_label_and_firmware_drops(self):
+        extra = [("Google", "Software Engineer Intern", "intern"),
+                 ("Zoox", "Firmware Engineer Intern - FW Core System Services", "intern"),
+                 ("Microsoft", "Electrical Engineer - Schie", "new grad")]
+        for i, (company, title, level) in enumerate(extra):
+            self.feed.append({"source": "instagram:zero2sudo", "company_name": company, "title": title,
+                              "url": f"https://jobs.example.com/bigtech/{i}", "locations": ["New York, NY"],
+                              "date_posted": self.feed[0]["date_posted"], "active": True, "level": level})
+        ok, _ = self.run_digest(file_exists=True)
+        self.assertTrue(ok)
+        report = json.loads(self.report.read_text())
+        google = next(s for s in report["levels"]["intern"]["scored"] if s["company"] == "Google")
+        self.assertGreaterEqual(google["score"], report["strong_threshold"])
+        self.assertEqual((google["tier"], google["on_a_tier_list"]), ("big_tech", True))
+        intern_text = "\n".join(report["levels"]["intern"]["messages"])
+        strong = intern_text.split("⭐", 1)[1].split("🤔", 1)[0]
+        self.assertIn("Google", strong)
+        self.assertNotIn("big tech", "\n".join(m for lv in report["levels"].values() for m in lv["messages"]))
+        self.assertEqual(sorted((d["reason"], d["company"]) for d in report["role_drops"]),
+                         [("firmware_electrical", "Microsoft"), ("firmware_electrical", "Zoox")])
 
     def test_listing_without_locations_posts_with_the_source_label(self):
         no_key = {k: v for k, v in self.feed[-1].items() if k != "locations"}
