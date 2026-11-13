@@ -403,7 +403,7 @@ def drop_seen_and_duplicates(items, seen, ttl_seconds, now_epoch, funnel):
         covering = [url_hit] if url_hit else (metro_hits if metro_hits and all(metro_hits) else [])
         if "run" in covering:
             reason = ("dedup:url" if url_hit else
-                      "dedup:company_title_metro" if all(title_hits) else "dedup:posting_id")
+                      "dedup:company_title_metro" if any(title_hits) else "dedup:posting_id")
             funnel.drop(reason, item)
             continue
         funnel.keep("dedup", item)
