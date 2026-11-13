@@ -237,11 +237,12 @@ def is_equity_round(round_type, prefixes):
 
 def score_listing(item, level, tier_match, profile, scoring, now_epoch):
     """
-    Score one listing. Returns (score, company_reasons, listing_reasons): short
-    strings such as "tier: promising startup" or "raised Series B $45M, Oct 2026"
-    describe the company (tier, unless the tier sets "show_label": false, and
-    Simplify funding profile; the same for every listing of that company), and "posted pay $55/hr", "pay unparsed: ..." or
-    "PhD/MS only" describe this listing alone.
+    Score one listing. Returns (score, company_reasons, listing_reasons).
+    company_reasons describe the company and are the same for every listing of
+    it: the tier (unless the tier sets "show_label": false) and the Simplify
+    funding profile, e.g. "tier: promising startup", "raised Series B $45M, Oct 2026".
+    listing_reasons describe this listing alone: "posted pay $55/hr",
+    "pay unparsed: ...", "PhD/MS only".
     """
     score = 0
     company_reasons = []
