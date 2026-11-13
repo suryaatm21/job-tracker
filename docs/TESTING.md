@@ -127,6 +127,8 @@ Ensure GitHub repository secrets are configured:
 python -m unittest discover -s .github/scripts -p 'test_private_digest.py'
 ```
 
+The suite also dry-runs cross-board copies of one posting (a zapply wrapper link next to the direct Greenhouse, Ashby or Workday link) from `fixtures/cross_board_zapply.md` and `fixtures/cross_board_listings.json`; each posts once.
+
 **Dry run against live data** (sends nothing and leaves `seen.json` untouched; prints per-source/per-level counts after each stage, drops per gate, pay coverage, and the rendered messages):
 
 ```bash

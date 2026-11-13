@@ -39,6 +39,7 @@ import re
 import sys
 import time
 from collections import defaultdict
+from urllib.parse import parse_qsl, urlsplit
 
 import requests
 
@@ -272,20 +273,120 @@ def listing_keys(item):
     return ([url_key] if url_key else []), metro_keys
 
 
+_UUID = r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}"
+# A Workday requisition id (1215821, R-4659, JR368156, REQ_0000045022), optionally
+# followed by the short copy suffix Workday adds when one requisition is posted
+# again (1215821-2). Longer tails such as R-2026-1255 are part of the id itself and
+# make it ambiguous, so they never match.
+_WORKDAY_REQ = r"((?:[A-Za-z]{1,4}[-_]?)?\d{4,})(?:-\d{1,2})?"
+
+
+def _workday_id(tenant, requisition):
+    match = re.fullmatch(_WORKDAY_REQ, requisition or "")
+    if not tenant or not match:
+        return None
+    return f"workday:{tenant.lower()}:{re.sub(r'[-_]', '', match.group(1)).lower()}"
+
+
+def _zapply_posting_id(slug):
+    """Read a zapply.jobs/l/d/<ats>-<board>-<id> slug. None when the id is not certain."""
+    ats, _, rest = slug.partition("-")
+    if ats == "greenhouse":
+        match = re.fullmatch(r"[a-z0-9-]+-(\d{4,})", rest)
+        return f"greenhouse:{match.group(1)}" if match else None
+    if ats in ("ashby", "lever"):
+        match = re.fullmatch(rf"[a-z0-9-]+-({_UUID})", rest, re.IGNORECASE)
+        return f"{ats}:{match.group(1).lower()}" if match else None
+    if ats == "workday":
+        # workday-<tenant>-<site>-<requisition>. The site is lower case; the
+        # requisition keeps its case, so it starts at the first token with a
+        # capital (R-4659). An all-lower-case slug ends in a numeric requisition,
+        # unless the token before it is numeric too (then the split is a guess).
+        tenant, *tokens = rest.split("-")
+        start = next((i for i, t in enumerate(tokens) if re.search(r"[A-Z]", t)), None)
+        if start is None:
+            start = len(tokens) - 1
+            if start < 1 or tokens[start - 1].isdigit():
+                return None
+        elif start < 1:
+            return None
+        return _workday_id(tenant, "-".join(tokens[start:]))
+    return None
+
+
+def posting_id(url):
+    """
+    The applicant-tracking system's own id for the posting a link leads to, read
+    from a zapply wrapper link or a direct Greenhouse, Ashby, Lever or Workday link,
+    so a wrapper and a direct link to one posting give the same id. None for any
+    other link, or when the id in it is ambiguous.
+    """
+    try:
+        parts = urlsplit((url or "").strip())
+        query = dict(parse_qsl(parts.query))
+    except ValueError:
+        return None
+    host = parts.netloc.lower()
+    segments = [s for s in parts.path.split("/") if s]
+    if host in ("zapply.jobs", "www.zapply.jobs"):
+        return _zapply_posting_id(segments[2]) if segments[:2] == ["l", "d"] and len(segments) == 3 else None
+    if re.fullmatch(r"\d{4,}", query.get("gh_jid", "")):
+        return f"greenhouse:{query['gh_jid']}"
+    if host.endswith(".greenhouse.io"):
+        if segments == ["embed", "job_app"]:
+            token = query.get("token", "")
+            return f"greenhouse:{token}" if re.fullmatch(r"\d{4,}", token) else None
+        if len(segments) >= 3 and segments[1] == "jobs" and re.fullmatch(r"\d{4,}", segments[2]):
+            return f"greenhouse:{segments[2]}"
+        return None
+    ats = {"jobs.ashbyhq.com": "ashby", "jobs.lever.co": "lever", "jobs.eu.lever.co": "lever"}.get(host)
+    if ats:
+        if segments and segments[-1].lower() in ("application", "apply"):
+            segments = segments[:-1]
+        if len(segments) == 2 and re.fullmatch(_UUID, segments[1], re.IGNORECASE):
+            return f"{ats}:{segments[1].lower()}"
+        return None
+    tenant = re.fullmatch(r"([a-z0-9-]+)\.wd\d+\.myworkdayjobs\.com", host)
+    if tenant:
+        tenant = tenant.group(1)
+    elif re.fullmatch(r"(?:[a-z0-9-]+\.)?myworkdaysite\.com", host) and "recruiting" in segments[:2]:
+        rest = segments[segments.index("recruiting") + 1:]
+        tenant = rest[0] if rest else None
+    if not tenant or "job" not in segments:
+        return None
+    detail = segments[segments.index("job") + 1:]
+    while detail and detail[-1].lower() in ("apply", "applymanually"):
+        detail = detail[:-1]
+    match = re.search(rf"_{_WORKDAY_REQ}$", detail[-1]) if detail else None
+    return _workday_id(tenant, match.group(1)) if match else None
+
+
+def posting_id_keys(item):
+    """
+    One posting-id key per gated metro of the listing, in the order of
+    item["_metros"], or none when posting_id finds no id in its link.
+    """
+    pid = posting_id(get_primary_url(item))
+    return [f"pid:{pid}|{metro}" for metro in item.get("_metros") or []] if pid else []
+
+
 def drop_seen_and_duplicates(items, seen, ttl_seconds, now_epoch, funnel):
     """
     Judge each listing on its own keys, in input order. A listing is dropped when
-    its URL key is already seen, or when every one of its company+title+metro keys
-    is already seen. A key is seen when seen.json holds it within the TTL window or
-    an earlier listing of this run recorded it. Cross-source copies of one posting
-    in the same metro therefore post once, the same title in another metro stays a
-    separate opportunity, and a listing in a never-sent metro is never suppressed
-    by a copy that was sent elsewhere. Kept listings carry their keys in item["_keys"].
+    its URL key is already seen, or when each of its metros is already covered by
+    that metro's company+title key or posting-id key (see posting_id). A key is
+    seen when seen.json holds it within the TTL window or an earlier listing of
+    this run recorded it. Cross-source copies of one posting in the same metro
+    therefore post once, even when boards link to it differently or name it
+    differently; the same title in another metro stays a separate opportunity, and
+    a listing in a never-sent metro is never suppressed by a copy that was sent
+    elsewhere. Kept listings carry their keys in item["_keys"].
     """
     run_seen = set()
     kept = []
     for item in items:
         url_keys, metro_keys = listing_keys(item)
+        id_keys = posting_id_keys(item)
 
         def hit(key):
             if key in run_seen:
@@ -294,17 +395,23 @@ def drop_seen_and_duplicates(items, seen, ttl_seconds, now_epoch, funnel):
             return "seen" if last is not None and now_epoch - last <= ttl_seconds else None
 
         url_hit = next((h for h in map(hit, url_keys) if h), None)
-        metro_hits = [hit(k) for k in metro_keys]
+        title_hits = [hit(k) for k in metro_keys]
+        id_hits = [hit(k) for k in id_keys] or [None] * len(title_hits)
+        # A metro is covered when its company+title key or its posting-id key is seen
+        metro_hits = ["run" if "run" in pair else ("seen" if "seen" in pair else None)
+                      for pair in zip(title_hits, id_hits)]
         covering = [url_hit] if url_hit else (metro_hits if metro_hits and all(metro_hits) else [])
         if "run" in covering:
-            funnel.drop("dedup:url" if url_hit else "dedup:company_title_metro", item)
+            reason = ("dedup:url" if url_hit else
+                      "dedup:company_title_metro" if all(title_hits) else "dedup:posting_id")
+            funnel.drop(reason, item)
             continue
         funnel.keep("dedup", item)
         if covering:
             funnel.drop("ttl:already_sent", item)
             continue
         funnel.keep("ttl", item)
-        item["_keys"] = [*url_keys, *metro_keys]
+        item["_keys"] = [*url_keys, *metro_keys, *id_keys]
         run_seen.update(item["_keys"])
         kept.append(item)
     return kept
