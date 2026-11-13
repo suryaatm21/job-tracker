@@ -278,14 +278,17 @@ _UUID = r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}"
 # followed by the short copy suffix Workday adds when one requisition is posted
 # again (1215821-2). Longer tails such as R-2026-1255 are part of the id itself and
 # make it ambiguous, so they never match.
-_WORKDAY_REQ = r"((?:[A-Za-z]{1,4}[-_]?)?\d{4,})(?:-\d{1,2})?"
+_WORKDAY_REQ = r"((?:[A-Za-z]{1,4}[-_]?)?\d{4,})(-\d{1,2})?"
 
 
 def _workday_id(tenant, requisition):
     match = re.fullmatch(_WORKDAY_REQ, requisition or "")
     if not tenant or not match:
         return None
-    return f"workday:{tenant.lower()}:{re.sub(r'[-_]', '', match.group(1)).lower()}"
+    base, suffix = match.group(1), match.group(2) or ""
+    if suffix and not (re.search(r"\d{6,}$", base) or re.match(r"[A-Za-z]", base)):
+        base += suffix
+    return f"workday:{tenant.lower()}:{re.sub(r'[-_]', '', base).lower()}"
 
 
 def _zapply_posting_id(slug):
@@ -358,7 +361,7 @@ def posting_id(url):
     while detail and detail[-1].lower() in ("apply", "applymanually"):
         detail = detail[:-1]
     match = re.search(rf"_{_WORKDAY_REQ}$", detail[-1]) if detail else None
-    return _workday_id(tenant, match.group(1)) if match else None
+    return _workday_id(tenant, match.group(0)[1:]) if match else None
 
 
 def posting_id_keys(item):

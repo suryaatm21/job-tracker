@@ -885,6 +885,14 @@ class PostingIdTest(unittest.TestCase):
                 with self.subTest(url=url):
                     self.assertEqual(digest.posting_id(url), expected)
 
+    def test_year_style_workday_requisitions_stay_distinct(self):
+        base = "https://acme.wd5.myworkdayjobs.com/site/job/Austin/"
+        first = digest.posting_id(base + "Software-Engineer_2026-1")
+        second = digest.posting_id(base + "Data-Engineer_2026-2")
+        self.assertNotEqual(first, second)
+        self.assertEqual(digest.posting_id(base + "Engineer_1215821-2"),
+                         digest.posting_id(base + "Engineer_1215821"))
+
     def test_ambiguous_or_unknown_ids_give_none(self):
         for url in [
             None, "", "not a url", "https://careers.oracle.com/jobs/302511888",
