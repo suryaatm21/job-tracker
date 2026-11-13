@@ -336,7 +336,7 @@ def _title_link(item):
 
 def group_by_company(entries):
     """
-    Split scored entries into one list per company, compared as company_tiers
+    Split scored entries into (company key, entries) pairs, compared as company_tiers
     matching normalizes names ("Vital Lyfe" and "VITAL LYFE" are one company).
     Groups come in the order of their first, best-ranked listing, and keep the
     input order inside each group.
@@ -346,7 +346,7 @@ def group_by_company(entries):
         name = entry[4]["company_name"]
         key = normalize_company(name) or str(name).strip().casefold()
         groups.setdefault(key, []).append(entry)
-    return list(groups.values())
+    return list(groups.items())
 
 
 def _shared(lists):
@@ -435,8 +435,7 @@ def render_level(level, scored, window_hours, strong_threshold, max_strong, max_
     shown = set()
 
     def add_groups(groups, is_strong):
-        for group in groups:
-            key = normalize_company(group[0][4]["company_name"]) or str(group[0][4]["company_name"]).strip().casefold()
+        for key, group in groups:
             lines.extend(render_company_group(group, is_strong, max_chars, key not in shown))
             shown.add(key)
 
