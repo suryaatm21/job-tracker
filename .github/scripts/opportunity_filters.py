@@ -12,7 +12,8 @@ Everything here is deterministic and driven by the JSON files in
 - parse_pay: posted pay text -> top of range as yearly and hourly USD
 - CompanyTiers: exact-alias company lookup from company_tiers.json
 - is_graduate_only: PhD/MS-only roles (title rules + Simplify's degrees field)
-- RoleGate: drops PM, silicon and non-engineering roles (title terms + board category)
+- RoleGate: drops PM, silicon, firmware, electrical and non-engineering roles
+  (title terms + board category)
 """
 import html
 import json
@@ -496,8 +497,9 @@ class CompanyTiers:
 
 ROLE_PM = "pm"
 ROLE_SILICON = "silicon"
+ROLE_FIRMWARE_ELECTRICAL = "firmware_electrical"
 ROLE_NON_ENGINEERING = "non_engineering"
-ROLE_REASONS = (ROLE_PM, ROLE_SILICON, ROLE_NON_ENGINEERING)
+ROLE_REASONS = (ROLE_PM, ROLE_SILICON, ROLE_FIRMWARE_ELECTRICAL, ROLE_NON_ENGINEERING)
 
 
 def _norm_role_text(text):
@@ -519,18 +521,21 @@ class RoleGate:
     Hard gate on the kind of work a listing is, from its title and board category.
 
     classify(item) returns (reason, matched) for a listing to drop, where reason
-    is ROLE_PM, ROLE_SILICON or ROLE_NON_ENGINEERING and matched names the term
-    or category that decided it, or None to keep the listing. Terms match whole
-    words after both sides are normalized ("Post-Silicon" -> "post silicon", so
-    "silicon" catches it; "sales" never catches "Salesforce"). Order:
+    is ROLE_PM, ROLE_SILICON, ROLE_FIRMWARE_ELECTRICAL or ROLE_NON_ENGINEERING
+    and matched names the term or category that decided it, or None to keep the
+    listing. Terms match whole words after both sides are normalized
+    ("Post-Silicon" -> "post silicon", so "silicon" catches it; "sales" never
+    catches "Salesforce"). Order:
 
     1. A PM title term drops, even with "technical" or "engineer" in the title.
     2. A silicon title term drops, even when the title says Engineer.
-    3. An always-drop non-engineering term drops whatever else the title says
+    3. A firmware or electrical title term drops whatever else the title says
+       ("Embedded Firmware Software Engineer", "Electrical Engineer").
+    4. An always-drop non-engineering term drops whatever else the title says
        ("Engineering Technician", "Embedded Account Executive").
-    4. A PM board category drops unless the title names engineering work
+    5. A PM board category drops unless the title names engineering work
        ("Product Engineer"); "Recipe Developer" in Simplify's Product bucket drops.
-    5. A title with a non-engineering term stays only when the rest of it names
+    6. A title with a non-engineering term stays only when the rest of it names
        an engineering or research role (engineer, developer, scientist,
        researcher), never on topical words like "AI" or "research" or via
        "manager" or "analyst": "Test and Launch Operations Engineer I" stays,
@@ -538,7 +543,7 @@ class RoleGate:
        chain, talent, recruiting) a bare engineer is not enough: the rest must
        also hold a qualifier such as software or ML. "Software Engineer, Supply
        Chain" stays, "Supply Chain Engineer" drops.
-    6. With no non-engineering title term, an engineering title term keeps the
+    7. With no non-engineering title term, an engineering title term keeps the
        listing ("Research Intern" in zapply's "Other Jobs"); otherwise a
        non-engineering category drops, an engineering category keeps, and with
        neither the listing stays only when engineering_only is set (sources
@@ -550,6 +555,7 @@ class RoleGate:
         config = config or {}
         pm = config.get("pm", {})
         silicon = config.get("silicon", {})
+        firmware_electrical = config.get("firmware_electrical", {})
         non_eng = config.get("non_engineering", {})
         eng = config.get("engineering", {})
         fold = lambda names: {str(n).strip().casefold() for n in names}
@@ -558,6 +564,7 @@ class RoleGate:
         self.pm_category_rescue = _phrase_re(pm.get("category_kept_when_title_has", []))
         self.silicon_title = _phrase_re(silicon.get("title_terms", []))
         self.silicon_ignore = _phrase_re(silicon.get("ignore_phrases", []))
+        self.firmware_electrical_title = _phrase_re(firmware_electrical.get("title_terms", []))
         self.non_eng_always = _phrase_re(non_eng.get("always_drop_title_terms", []))
         self.non_eng_title = _phrase_re(non_eng.get("title_terms", []))
         self.non_eng_categories = fold(non_eng.get("categories", []))
@@ -583,6 +590,9 @@ class RoleGate:
         term = self._find(self.silicon_title, silicon_text)
         if term:
             return ROLE_SILICON, term
+        term = self._find(self.firmware_electrical_title, title)
+        if term:
+            return ROLE_FIRMWARE_ELECTRICAL, term
         term = self._find(self.non_eng_always, title)
         if term:
             return ROLE_NON_ENGINEERING, term

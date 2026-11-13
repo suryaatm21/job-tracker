@@ -1,5 +1,5 @@
 {
-  "_about": "Private opportunity digest (send_private_digest.py). Hard gates: location (metros below; a source's missing_location_label passes its listings that have no locations); only when a listing states pay, the pay floor; then the role gate (role_gate below), which drops PM, silicon and non-engineering roles. Scoring then decides 'strong signal' vs 'maybe' among what is left; it never drops a listing. Company tiers live in company_tiers.json.",
+  "_about": "Private opportunity digest (send_private_digest.py). Hard gates: location (metros below; a source's missing_location_label passes its listings that have no locations); only when a listing states pay, the pay floor; then the role gate (role_gate below), which drops PM, silicon, firmware, electrical and non-engineering roles. Scoring then decides 'strong signal' vs 'maybe' among what is left; it never drops a listing. Company tiers live in company_tiers.json.",
 
   "sources": [
     {"name": "SimplifyJobs/New-Grad-Positions", "type": "listings_json", "repo": "SimplifyJobs/New-Grad-Positions", "level": "new_grad"},
@@ -94,9 +94,13 @@
       "category_kept_when_title_has": ["engineer", "engineers", "engineering", "scientist", "software"]
     },
     "silicon": {
-      "_about": "Chip-design work, dropped even when titled Engineer. Other hardware engineering stays.",
+      "_about": "Chip-design work, dropped even when titled Engineer. Other hardware engineering stays unless firmware_electrical below drops it.",
       "title_terms": ["silicon", "asic", "rtl", "vlsi", "design verification", "physical design", "dft", "design for test", "design for testability", "chip design", "ic design", "tapeout", "fab", "cleanroom"],
       "ignore_phrases": ["silicon valley", "non silicon"]
+    },
+    "firmware_electrical": {
+      "_about": "Firmware and electrical engineering work, dropped whatever else the title says ('Embedded Firmware Software Engineer', 'Electrical Engineering Internship'). 'Embedded Software Engineer Intern' and 'Hardware Engineer Intern' stay.",
+      "title_terms": ["firmware", "electrical"]
     },
     "non_engineering": {
       "_about": "always_drop_title_terms drop a listing whatever else the title says ('Engineering Technician', 'Embedded Account Executive', 'Information Security Officer'; 'officer' and 'officers' are whole words, so 'Security Engineer Intern' stays). A title_terms match drops it unless the title, with these terms cut out, still names an engineering role (role_terms below): 'Test and Launch Operations Engineer I' stays, 'Marketing Manager, AI' and 'Clinical Research Coordinator' drop. needs_qualifier_terms also need a qualifier_terms word in the rest: 'Software Engineer, Supply Chain' stays, 'Supply Chain Engineer' drops. The categories are zapply sections that mix in non-engineering work: they are title-checked, not absolute, so a listing there stays only when its title has an engineering title term ('Research Intern' stays, 'Supply Chain Internship' drops).",
@@ -125,7 +129,7 @@
         "machine learning", "ml", "ai", "artificial intelligence", "deep learning", "computer vision", "nlp", "llm",
         "data science", "data scientist", "scientist", "scientists", "research", "researcher", "researchers", "r&d",
         "quant research", "quant researcher", "quantitative research", "quantitative researcher", "quant developer", "quantitative developer",
-        "devops", "devsecops", "mlops", "sre", "site reliability", "firmware", "embedded", "fpga", "robotics", "security", "cybersecurity",
+        "devops", "devsecops", "mlops", "sre", "site reliability", "embedded", "fpga", "robotics", "security", "cybersecurity",
         "computer science", "programming", "full stack", "fullstack", "frontend", "backend", "sdet", "applied science",
         "web development", "application development", "software development", "system development", "systems development"
       ]
